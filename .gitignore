@@ -1,0 +1,19 @@
+# Build output
+build/
+
+# Managed components (downloaded dependencies — restored by idf.py build)
+managed_components/
+
+# SDK config backup
+sdkconfig.old
+
+# VS Code local settings (optional — remove if you want to share config)
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
