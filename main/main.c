@@ -5,6 +5,7 @@
 #include "freertos/queue.h"
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "esp_log.h"
 
 /* ESP-SR API */
@@ -33,19 +34,32 @@ static const char *TAG = "SENTINEL";
 #define COOLING_PIN         GPIO_NUM_11
 
 // ---------------------------------------------------------------------------
-// Blinds Motor Pins (L298N)
+// Servo Motor Pins (blinds — 4 servos, 2 per room, move simultaneously)
 // ---------------------------------------------------------------------------
-#define BEDROOM_BLIND_OPEN    GPIO_NUM_12
-#define BEDROOM_BLIND_CLOSE   GPIO_NUM_13
-#define PARLOUR_BLIND_OPEN    GPIO_NUM_14
-#define PARLOUR_BLIND_CLOSE   GPIO_NUM_15
+#define BEDROOM_SERVO_1_PIN   GPIO_NUM_12
+#define BEDROOM_SERVO_2_PIN   GPIO_NUM_13
+#define PARLOUR_SERVO_1_PIN   GPIO_NUM_14
+#define PARLOUR_SERVO_2_PIN   GPIO_NUM_15
+
+// ---------------------------------------------------------------------------
+// Servo PWM Configuration (SG90 — 50Hz, 1ms–2ms pulse range)
+// ---------------------------------------------------------------------------
+#define SERVO_FREQ_HZ         50
+#define SERVO_TIMER_RES       LEDC_TIMER_14_BIT   // 0–16383
+#define SERVO_DUTY_CLOSED     819                  // ~1.0ms → 0°  (closed)
+#define SERVO_DUTY_OPEN       1638                 // ~2.0ms → 180° (open)
+
+// LEDC channels — one per servo
+#define BEDROOM_SERVO_1_CH    LEDC_CHANNEL_0
+#define BEDROOM_SERVO_2_CH    LEDC_CHANNEL_1
+#define PARLOUR_SERVO_1_CH    LEDC_CHANNEL_2
+#define PARLOUR_SERVO_2_CH    LEDC_CHANNEL_3
 
 // ---------------------------------------------------------------------------
 // Security & Feedback
 // ---------------------------------------------------------------------------
 #define LOCKDOWN_PIN            GPIO_NUM_16
 #define BUZZER_PIN              GPIO_NUM_17
-#define BLIND_MOTOR_DURATION_MS 3000
 
 // ---------------------------------------------------------------------------
 // Confidence threshold.
@@ -94,23 +108,19 @@ static esp_afe_sr_data_t  *g_afe_data   = NULL;
 typedef enum { BEEP_SINGLE, BEEP_DOUBLE } beep_type_t;
 static QueueHandle_t s_feedback_queue = NULL;
 
-// Blind motor task arguments
-typedef struct {
-    gpio_num_t open_pin;
-    gpio_num_t close_pin;
-    bool       open;
-} blind_args_t;
+// Servo state tracking
+static bool bedroom_blinds_open = false;
+static bool parlour_blinds_open = false;
 
 // ---------------------------------------------------------------------------
 // GPIO Initialization
 // ---------------------------------------------------------------------------
 static void init_gpio(void) {
+    // --- Relay + buzzer outputs (simple digital) ---
     uint64_t output_pins =
         (1ULL << KITCHEN_LIGHT_PIN)   | (1ULL << BEDROOM_LIGHT_PIN)   |
         (1ULL << PARLOUR_LIGHT_PIN)   | (1ULL << OUTSIDE_LIGHT_PIN)   |
-        (1ULL << COOLING_PIN)         | (1ULL << BEDROOM_BLIND_OPEN)  |
-        (1ULL << BEDROOM_BLIND_CLOSE) | (1ULL << PARLOUR_BLIND_OPEN)  |
-        (1ULL << PARLOUR_BLIND_CLOSE) | (1ULL << LOCKDOWN_PIN)        |
+        (1ULL << COOLING_PIN)         | (1ULL << LOCKDOWN_PIN)        |
         (1ULL << BUZZER_PIN);
 
     gpio_config_t io_conf = {
@@ -127,14 +137,44 @@ static void init_gpio(void) {
     gpio_set_level(PARLOUR_LIGHT_PIN,   0);
     gpio_set_level(OUTSIDE_LIGHT_PIN,   0);
     gpio_set_level(COOLING_PIN,         0);
-    gpio_set_level(BEDROOM_BLIND_OPEN,  0);
-    gpio_set_level(BEDROOM_BLIND_CLOSE, 0);
-    gpio_set_level(PARLOUR_BLIND_OPEN,  0);
-    gpio_set_level(PARLOUR_BLIND_CLOSE, 0);
     gpio_set_level(LOCKDOWN_PIN,        0);
     gpio_set_level(BUZZER_PIN,          0);
 
-    ESP_LOGI(TAG, "GPIO initialized. All outputs OFF.");
+    ESP_LOGI(TAG, "GPIO initialized. All relay outputs OFF.");
+}
+
+// ---------------------------------------------------------------------------
+// Servo Initialization (LEDC PWM at 50Hz)
+// ---------------------------------------------------------------------------
+static void init_servo_channel(ledc_channel_t ch, gpio_num_t pin) {
+    ledc_channel_config_t ch_cfg = {
+        .gpio_num   = pin,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel    = ch,
+        .timer_sel  = LEDC_TIMER_0,
+        .duty       = SERVO_DUTY_CLOSED,   // start at 0° (closed)
+        .hpoint     = 0,
+    };
+    ledc_channel_config(&ch_cfg);
+}
+
+static void init_servos(void) {
+    // Shared timer for all 4 servo channels
+    ledc_timer_config_t timer_cfg = {
+        .speed_mode      = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = SERVO_TIMER_RES,
+        .timer_num       = LEDC_TIMER_0,
+        .freq_hz         = SERVO_FREQ_HZ,
+        .clk_cfg         = LEDC_AUTO_CLK,
+    };
+    ledc_timer_config(&timer_cfg);
+
+    init_servo_channel(BEDROOM_SERVO_1_CH, BEDROOM_SERVO_1_PIN);
+    init_servo_channel(BEDROOM_SERVO_2_CH, BEDROOM_SERVO_2_PIN);
+    init_servo_channel(PARLOUR_SERVO_1_CH, PARLOUR_SERVO_1_PIN);
+    init_servo_channel(PARLOUR_SERVO_2_CH, PARLOUR_SERVO_2_PIN);
+
+    ESP_LOGI(TAG, "Servos initialized (4x 50Hz PWM). All blinds CLOSED.");
 }
 
 // ---------------------------------------------------------------------------
@@ -162,36 +202,19 @@ static void trigger_feedback(beep_type_t type) {
 }
 
 // ---------------------------------------------------------------------------
-// Async Blind Motor Task
+// Servo Blind Control
+// Sets both servos in a room to open (180°) or closed (0°) simultaneously.
 // ---------------------------------------------------------------------------
-static void blind_worker_task(void *arg) {
-    blind_args_t *args = (blind_args_t *)arg;
-    gpio_set_level(args->open_pin,  0);
-    gpio_set_level(args->close_pin, 0);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    if (args->open) {
-        ESP_LOGI(TAG, "Motor OPEN running...");
-        gpio_set_level(args->open_pin, 1);
-    } else {
-        ESP_LOGI(TAG, "Motor CLOSE running...");
-        gpio_set_level(args->close_pin, 1);
-    }
-    vTaskDelay(pdMS_TO_TICKS(BLIND_MOTOR_DURATION_MS));
-    gpio_set_level(args->open_pin,  0);
-    gpio_set_level(args->close_pin, 0);
-    ESP_LOGI(TAG, "Motor stopped.");
-    free(args);
-    vTaskDelete(NULL);
+static void set_servo_duty(ledc_channel_t ch, uint32_t duty) {
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, ch, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, ch);
 }
 
-static void run_blind(gpio_num_t open_pin, gpio_num_t close_pin, bool open) {
-    blind_args_t *args = malloc(sizeof(blind_args_t));
-    if (args) {
-        args->open_pin  = open_pin;
-        args->close_pin = close_pin;
-        args->open      = open;
-        xTaskCreate(blind_worker_task, "blind_work", 2048, (void *)args, 3, NULL);
-    }
+static void run_blind(ledc_channel_t ch1, ledc_channel_t ch2, bool open) {
+    uint32_t duty = open ? SERVO_DUTY_OPEN : SERVO_DUTY_CLOSED;
+    ESP_LOGI(TAG, "Servo → %s (duty=%lu)", open ? "OPEN 180°" : "CLOSED 0°", duty);
+    set_servo_duty(ch1, duty);
+    set_servo_duty(ch2, duty);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,10 +229,10 @@ static void handle_command(int cmd_id) {
         case 4:  ESP_LOGW(TAG, "ACTION → Bedroom Light OFF");     gpio_set_level(BEDROOM_LIGHT_PIN, 0); break;
         case 5:  ESP_LOGW(TAG, "ACTION → Parlour Light ON");      gpio_set_level(PARLOUR_LIGHT_PIN, 1); break;
         case 6:  ESP_LOGW(TAG, "ACTION → Parlour Light OFF");     gpio_set_level(PARLOUR_LIGHT_PIN, 0); break;
-        case 7:  ESP_LOGW(TAG, "ACTION → Bedroom Blinds OPEN");   run_blind(BEDROOM_BLIND_OPEN,  BEDROOM_BLIND_CLOSE, true);  break;
-        case 8:  ESP_LOGW(TAG, "ACTION → Bedroom Blinds CLOSE");  run_blind(BEDROOM_BLIND_OPEN,  BEDROOM_BLIND_CLOSE, false); break;
-        case 9:  ESP_LOGW(TAG, "ACTION → Parlour Blinds OPEN");   run_blind(PARLOUR_BLIND_OPEN,  PARLOUR_BLIND_CLOSE, true);  break;
-        case 10: ESP_LOGW(TAG, "ACTION → Parlour Blinds CLOSE");  run_blind(PARLOUR_BLIND_OPEN,  PARLOUR_BLIND_CLOSE, false); break;
+        case 7:  ESP_LOGW(TAG, "ACTION → Bedroom Blinds OPEN");   run_blind(BEDROOM_SERVO_1_CH, BEDROOM_SERVO_2_CH, true);  bedroom_blinds_open = true;  break;
+        case 8:  ESP_LOGW(TAG, "ACTION → Bedroom Blinds CLOSE");  run_blind(BEDROOM_SERVO_1_CH, BEDROOM_SERVO_2_CH, false); bedroom_blinds_open = false; break;
+        case 9:  ESP_LOGW(TAG, "ACTION → Parlour Blinds OPEN");   run_blind(PARLOUR_SERVO_1_CH, PARLOUR_SERVO_2_CH, true);  parlour_blinds_open = true;  break;
+        case 10: ESP_LOGW(TAG, "ACTION → Parlour Blinds CLOSE");  run_blind(PARLOUR_SERVO_1_CH, PARLOUR_SERVO_2_CH, false); parlour_blinds_open = false; break;
         case 11: ESP_LOGW(TAG, "ACTION → Cooling ON");            gpio_set_level(COOLING_PIN, 1);       break;
         case 12: ESP_LOGW(TAG, "ACTION → Cooling OFF");           gpio_set_level(COOLING_PIN, 0);       break;
         case 13: ESP_LOGW(TAG, "ACTION → Outside Light ON");      gpio_set_level(OUTSIDE_LIGHT_PIN, 1); break;
@@ -422,6 +445,7 @@ static void detect_task(void *arg) {
 // ---------------------------------------------------------------------------
 void app_main(void) {
     init_gpio();
+    init_servos();
     init_mic();
 
     s_feedback_queue = xQueueCreate(5, sizeof(beep_type_t));
