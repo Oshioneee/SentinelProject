@@ -1,10 +1,4 @@
 dependencies:
-  esp-sr:
-    dependencies: []
-    source:
-      path: components\esp-sr
-      type: local
-    version: 2.4.2
   espressif/cjson:
     component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
     dependencies:
@@ -35,16 +29,6 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.8.0
-  espressif/mqtt:
-    component_hash: ffdad5659706b4dc14bc63f8eb73ef765efa015bf7e9adf71c813d52a2dc9342
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.3'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 1.0.0
   idf:
     source:
       type: idf
@@ -53,9 +37,7 @@ direct_dependencies:
 - espressif/cjson
 - espressif/dl_fft
 - espressif/esp-dsp
-- espressif/esp-sr
-- espressif/mqtt
 - idf
-manifest_hash: 403bcd399335fa5181ded5748eaa25e5a05834de0f001e99a3aea2ee275ad39e
+manifest_hash: 1716d5e75e4eed557ae65e8829c372e1ec088f6928102c2ec1b55edefbdae2b9
 target: esp32s3
 version: 3.0.0

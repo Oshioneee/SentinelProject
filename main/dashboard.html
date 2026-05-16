@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>SENTINEL</title>
+<style>
+/* ═══════════════════════════════════════════════
+   SENTINEL Dashboard  –  self-contained, no CDN
+   Aesthetic: military NOC / SOC terminal
+   Fonts: system monospace + system sans
+   ═══════════════════════════════════════════════ */
+:root{
+  --bg:        #06080c;
+  --card:      #0b0f16;
+  --card2:     #10161f;
+  --border:    #182030;
+  --border2:   #1e2d40;
+  --ok:        #00e676;
+  --ok-glow:   rgba(0,230,118,.18);
+  --ok-dim:    rgba(0,230,118,.08);
+  --danger:    #ff3d3d;
+  --danger-glow: rgba(255,61,61,.18);
+  --danger-dim:  rgba(255,61,61,.08);
+  --warn:      #ffa726;
+  --warn-glow: rgba(255,167,38,.18);
+  --warn-dim:  rgba(255,167,38,.08);
+  --blue:      #40c4ff;
+  --text:      #c0d0e0;
+  --text2:     #7a9ab8;
+  --muted:     #344a5e;
+  --mono: 'Courier New',Courier,'Lucida Console',monospace;
+  --sans: -apple-system,'Segoe UI',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--mono);
+  font-size:13px;
+  min-height:100vh;
+}
+/* subtle green scanline grid */
+body::before{
+  content:'';
+  position:fixed;inset:0;
+  background-image:
+    linear-gradient(rgba(0,230,118,.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,230,118,.018) 1px, transparent 1px);
+  background-size:44px 44px;
+  pointer-events:none;z-index:0;
+}
+/* vignette */
+body::after{
+  content:'';
+  position:fixed;inset:0;
+  background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.65) 100%);
+  pointer-events:none;z-index:0;
+}
+#root{position:relative;z-index:1;max-width:480px;margin:0 auto;padding:10px 10px 20px}
+
+/* ══ TOPBAR ══ */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;
+  background:var(--card);
+  border:1px solid var(--border2);
+  border-radius:12px;
+  margin-bottom:10px;
+}
+.logo{
+  font-family:var(--sans);
+  font-size:15px;font-weight:800;
+  letter-spacing:.25em;
+  color:var(--ok);
+  text-shadow:0 0 16px var(--ok-glow);
+}
+.logo sub{font-size:9px;color:var(--muted);font-weight:400;letter-spacing:.05em}
+.node-strip{display:flex;gap:10px;align-items:center}
+.ndot-wrap{display:flex;flex-direction:column;align-items:center;gap:3px}
+.ndot-wrap .lbl{font-size:8px;color:var(--muted);letter-spacing:.05em}
+.ndot{
+  width:10px;height:10px;border-radius:50%;
+  background:var(--muted);
+  transition:background .4s,box-shadow .4s;
+}
+.ndot.on { background:var(--ok);    box-shadow:0 0 8px var(--ok),0 0 16px var(--ok-glow) }
+.ndot.off{ background:var(--danger);box-shadow:0 0 6px var(--danger) }
+.topbar-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.time-disp{font-size:13px;color:var(--text)}
+.refresh-tag{font-size:9px;color:var(--muted);letter-spacing:.05em}
+
+/* ══ ALERT STRIP ══ */
+.alert-strip{
+  display:grid;grid-template-columns:1fr 1fr 1fr;
+  gap:8px;margin-bottom:10px;
+}
+.pill{
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  padding:11px 6px;border-radius:12px;
+  border:1px solid var(--border);
+  background:var(--card);
+  transition:all .3s;
+}
+.pill .p-ico{font-size:19px}
+.pill .p-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.pill .p-val{font-size:11px;font-weight:bold;letter-spacing:.06em;transition:color .3s}
+/* states */
+.pill.ok   { border-color:var(--border) }
+.pill.ok .p-val { color:var(--ok) }
+.pill.danger{
+  border-color:var(--danger);
+  background:var(--danger-dim);
+  animation:alarm 1s ease-in-out infinite;
+}
+.pill.danger .p-val{ color:var(--danger) }
+.pill.warn  { border-color:var(--warn); background:var(--warn-dim) }
+.pill.warn .p-val { color:var(--warn) }
+@keyframes alarm{
+  0%,100%{box-shadow:0 0 0 0 var(--danger-dim)}
+  50%{box-shadow:0 0 0 8px transparent}
+}
+
+/* ══ SECTION DIVIDER ══ */
+.divider{
+  display:flex;align-items:center;gap:8px;
+  font-size:9px;color:var(--muted);letter-spacing:.14em;
+  text-transform:uppercase;margin:10px 0 7px;
+}
+.divider::before,.divider::after{
+  content:'';flex:1;height:1px;background:var(--border);
+}
+.divider::before{flex:0 0 6px}
+
+/* ══ GAS GRID ══ */
+.gas-grid{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:8px;margin-bottom:10px;
+}
+.gas-card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:12px;padding:12px 12px 10px;
+  transition:border-color .4s,box-shadow .4s;
+}
+.gas-card.over{
+  border-color:var(--danger);
+  box-shadow:inset 0 0 0 1px var(--danger-dim);
+}
+.gas-head{
+  display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:6px;
+}
+.gas-name{font-size:10px;color:var(--text2)}
+.gas-max {font-size:9px;color:var(--muted)}
+.gas-reading{
+  font-size:26px;line-height:1;color:var(--text);
+  margin-bottom:8px;letter-spacing:-.02em;
+}
+.gas-reading em{font-style:normal;font-size:10px;color:var(--muted);margin-left:2px}
+.gas-track{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.gas-fill{
+  height:100%;border-radius:2px;
+  transition:width .7s ease,background .4s;
+  background:var(--ok);
+}
+
+/* ══ FACE CARD ══ */
+.face-card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:12px;padding:12px;
+  margin-bottom:10px;
+}
+.face-inner{display:flex;align-items:center;gap:12px}
+.face-avatar{
+  width:50px;height:50px;border-radius:10px;
+  background:var(--card2);border:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;flex-shrink:0;
+}
+.face-name{font-size:20px;color:var(--ok);letter-spacing:.02em;transition:color .3s}
+.face-name.unknown{color:var(--danger)}
+.face-sub{font-size:10px;color:var(--text2);margin-top:3px}
+.face-loc{font-size:10px;color:var(--blue);margin-top:2px}
+
+/* ══ EVENT LOG ══ */
+.event-card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:12px;overflow:hidden;margin-bottom:10px;
+}
+.ev-row{
+  display:flex;align-items:flex-start;gap:9px;
+  padding:9px 12px;border-bottom:1px solid var(--border);
+}
+.ev-row:last-child{border-bottom:none}
+.ev-row.new{animation:slid .35s ease}
+@keyframes slid{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.ev-dot{
+  width:7px;height:7px;border-radius:50%;
+  margin-top:3px;flex-shrink:0;
+}
+.ev-dot.ok    {background:var(--ok)   }
+.ev-dot.warn  {background:var(--warn) }
+.ev-dot.danger{background:var(--danger)}
+.ev-body{flex:1}
+.ev-msg{font-size:11px;color:var(--text);line-height:1.4}
+.ev-time{font-size:9px;color:var(--muted);margin-top:2px}
+
+/* ══ CONTROLS ══ */
+.ctrl-grid{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:8px;margin-bottom:10px;
+}
+.ctrl-btn{
+  display:flex;flex-direction:column;align-items:center;gap:7px;
+  padding:13px 8px;border-radius:12px;
+  border:1px solid var(--border);
+  background:var(--card);color:var(--text);
+  cursor:pointer;font-family:var(--mono);
+  font-size:10px;letter-spacing:.05em;
+  text-transform:uppercase;
+  transition:all .15s;
+  user-select:none;
+}
+.ctrl-btn:hover{ border-color:var(--border2);background:var(--card2) }
+.ctrl-btn:active{transform:scale(.96);opacity:.8}
+.ctrl-btn .ico{font-size:22px}
+.ctrl-btn .pin{font-size:9px;color:var(--muted)}
+.ctrl-btn.blue  {border-color:#1a3050}
+.ctrl-btn.blue:hover {border-color:#40c4ff;box-shadow:0 0 10px rgba(64,196,255,.1)}
+.ctrl-btn.green {border-color:#0d2b1a}
+.ctrl-btn.green:hover{border-color:var(--ok);box-shadow:0 0 10px var(--ok-dim)}
+.ctrl-btn.amber {border-color:#2b1a0d}
+.ctrl-btn.amber:hover{border-color:var(--warn);box-shadow:0 0 10px var(--warn-dim)}
+.ctrl-btn.red   {border-color:#2b0d0d}
+.ctrl-btn.red:hover  {border-color:var(--danger);box-shadow:0 0 10px var(--danger-dim)}
+
+/* ══ TOAST ══ */
+#toast{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);
+  background:var(--card2);border:1px solid var(--border2);
+  border-radius:20px;padding:8px 18px;
+  font-size:11px;color:var(--ok);
+  transition:transform .25s ease;pointer-events:none;
+  white-space:nowrap;z-index:99;
+}
+#toast.show{transform:translateX(-50%) translateY(0)}
+
+/* ══ FOOTER ══ */
+.footer{text-align:center;font-size:10px;color:var(--muted);padding:6px 0}
+</style>
+</head>
+<body>
+<div id="root">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div>
+      <div class="logo">SENTINEL<sub>/ NODE_1</sub></div>
+    </div>
+    <div class="node-strip">
+      <div class="ndot-wrap"><div class="ndot" id="d2"></div><div class="lbl">N2</div></div>
+      <div class="ndot-wrap"><div class="ndot" id="d3"></div><div class="lbl">N3</div></div>
+      <div class="ndot-wrap"><div class="ndot" id="d4"></div><div class="lbl">N4</div></div>
+    </div>
+    <div class="topbar-right">
+      <div class="time-disp" id="clock">--:--:--</div>
+      <div class="refresh-tag" id="rtag">POLLING…</div>
+    </div>
+  </div>
+
+  <!-- ALERT PILLS -->
+  <div class="alert-strip">
+    <div class="pill ok" id="pill-sec">
+      <div class="p-ico">🔒</div>
+      <div class="p-lbl">Security</div>
+      <div class="p-val" id="sec-val">CLEAR</div>
+    </div>
+    <div class="pill ok" id="pill-gas">
+      <div class="p-ico">💨</div>
+      <div class="p-lbl">Gas</div>
+      <div class="p-val" id="gas-val">SAFE</div>
+    </div>
+    <div class="pill ok" id="pill-pir">
+      <div class="p-ico">👁</div>
+      <div class="p-lbl">Motion</div>
+      <div class="p-val" id="pir-val">IDLE</div>
+    </div>
+  </div>
+
+  <!-- GAS SENSORS -->
+  <div class="divider">Gas Sensors — NODE_3</div>
+  <div class="gas-grid">
+    <div class="gas-card" id="gc-lpg">
+      <div class="gas-head">
+        <span class="gas-name">LPG</span>
+        <span class="gas-max">V2 · /1000</span>
+      </div>
+      <div class="gas-reading"><span id="vv-lpg">—</span><em>ppm</em></div>
+      <div class="gas-track"><div class="gas-fill" id="gf-lpg" style="width:0"></div></div>
+    </div>
+    <div class="gas-card" id="gc-ch4">
+      <div class="gas-head">
+        <span class="gas-name">CH₄</span>
+        <span class="gas-max">V3 · /1000</span>
+      </div>
+      <div class="gas-reading"><span id="vv-ch4">—</span><em>ppm</em></div>
+      <div class="gas-track"><div class="gas-fill" id="gf-ch4" style="width:0"></div></div>
+    </div>
+    <div class="gas-card" id="gc-smoke">
+      <div class="gas-head">
+        <span class="gas-name">Smoke</span>
+        <span class="gas-max">V4 · /300</span>
+      </div>
+      <div class="gas-reading"><span id="vv-smoke">—</span><em>ppm</em></div>
+      <div class="gas-track"><div class="gas-fill" id="gf-smoke" style="width:0"></div></div>
+    </div>
+    <div class="gas-card" id="gc-h2">
+      <div class="gas-head">
+        <span class="gas-name">H₂</span>
+        <span class="gas-max">V5 · /500</span>
+      </div>
+      <div class="gas-reading"><span id="vv-h2">—</span><em>ppm</em></div>
+      <div class="gas-track"><div class="gas-fill" id="gf-h2" style="width:0"></div></div>
+    </div>
+  </div>
+
+  <!-- LAST VERIFICATION -->
+  <div class="divider">Last Verification — V12</div>
+  <div class="face-card">
+    <div class="face-inner">
+      <div class="face-avatar">🪪</div>
+      <div>
+        <div class="face-name" id="f-name">Waiting…</div>
+        <div class="face-sub"  id="f-conf">No capture yet</div>
+        <div class="face-loc"  id="f-loc"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EVENT LOG -->
+  <div class="divider">Event Log — V6</div>
+  <div class="event-card" id="ev-log">
+    <div class="ev-row">
+      <div class="ev-dot ok"></div>
+      <div class="ev-body">
+        <div class="ev-msg">Waiting for first packet…</div>
+        <div class="ev-time">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="divider">Controls</div>
+  <div class="ctrl-grid">
+    <button class="ctrl-btn blue"  onclick="cmd(11,'Manual Verify')">
+      <div class="ico">📸</div>
+      <div>Manual Verify</div>
+      <div class="pin">V11 · Webhook</div>
+    </button>
+    <button class="ctrl-btn green" onclick="cmd(13,'Door Open')">
+      <div class="ico">🚪</div>
+      <div>Open Main Door</div>
+      <div class="pin">V13 → NODE_2</div>
+    </button>
+    <button class="ctrl-btn amber" onclick="cmd(14,'Vent ON')">
+      <div class="ico">💨</div>
+      <div>Force Vent ON</div>
+      <div class="pin">V14 → NODE_3</div>
+    </button>
+    <button class="ctrl-btn red"   onclick="cmd(15,'Valve Open')">
+      <div class="ico">🔧</div>
+      <div>Open Valve</div>
+      <div class="pin">V15 → NODE_3</div>
+    </button>
+  </div>
+
+  <div class="footer" id="uptime">Uptime: —</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ── CONFIG ── */
+const POLL_MS   = 2500;
+const GAS_LIMIT = { lpg:1000, ch4:1000, smoke:300, h2:500 };
+
+/* ── HELPERS ── */
+function $(id){ return document.getElementById(id) }
+function fmt_up(s){
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;
+  return (h?h+'h ':'')+( m?m+'m ':'')+ss+'s';
+}
+function toast(msg){
+  const el=$('toast'); el.textContent=msg; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 2200);
+}
+
+/* ── PILL UPDATER ── */
+function setPill(id,val_id,txt,state){
+  /* state: 'ok' | 'warn' | 'danger' */
+  $(id).className = 'pill ' + state;
+  $(val_id).textContent = txt;
+}
+
+/* ── GAS BAR UPDATER ── */
+function setGas(key, val, max){
+  const pct  = Math.min(100, (val/max)*100);
+  const over = val >= max;
+  const col  = over ? 'var(--danger)' : pct > 65 ? 'var(--warn)' : 'var(--ok)';
+  $('vv-'+key).textContent = val.toFixed(0);
+  const fill = $('gf-'+key);
+  fill.style.width      = pct+'%';
+  fill.style.background = col;
+  $('gc-'+key).className = 'gas-card'+(over?' over':'');
+}
+
+/* ── EVENT LOG RENDERER ── */
+let lastEvCount = 0;
+function renderEvents(evs){
+  if(!evs||!evs.length) return;
+  const box = $('ev-log');
+  box.innerHTML = evs.map((e,i)=>{
+    const cls = e.lvl===2?'danger': e.lvl===1?'warn':'ok';
+    const isNew = (i===0 && evs.length > lastEvCount) ? ' new' : '';
+    return `<div class="ev-row${isNew}">
+      <div class="ev-dot ${cls}"></div>
+      <div class="ev-body">
+        <div class="ev-msg">${e.msg}</div>
+        <div class="ev-time">${e.t}</div>
+      </div>
+    </div>`;
+  }).join('');
+  lastEvCount = evs.length;
+}
+
+/* ── CLOCK ── */
+setInterval(()=>{
+  $('clock').textContent = new Date().toLocaleTimeString();
+},1000);
+
+/* ── POLL LOOP ── */
+function poll(){
+  fetch('/api/status')
+    .then(r=>r.json())
+    .then(d=>{
+      /* Node online dots */
+      $('d2').className='ndot '+(d.n2?'on':'off');
+      $('d3').className='ndot '+(d.n3?'on':'off');
+      $('d4').className='ndot '+(d.n4?'on':'off');
+
+      /* Alert pills */
+      setPill('pill-sec','sec-val', d.sec?'ALERT!':'CLEAR',   d.sec?'danger':'ok');
+      setPill('pill-gas','gas-val', d.gas?'DANGER':'SAFE',    d.gas?'danger':'ok');
+      setPill('pill-pir','pir-val', d.pir?'ACTIVE':'IDLE',    d.pir?'warn':'ok');
+
+      /* Gas gauges */
+      setGas('lpg',   d.lpg,   GAS_LIMIT.lpg);
+      setGas('ch4',   d.ch4,   GAS_LIMIT.ch4);
+      setGas('smoke', d.smoke, GAS_LIMIT.smoke);
+      setGas('h2',    d.h2,    GAS_LIMIT.h2);
+
+      /* Face result  —  format: "Name|Conf|Location" */
+      const parts = (d.face||'').split('|');
+      const name  = parts[0]||'';
+      const conf  = parts[1]||'';
+      const loc   = parts[2]||'';
+      if(name && name!=='Unknown'){
+        $('f-name').textContent = name;
+        $('f-name').className   = 'face-name';
+      } else if(name==='Unknown'){
+        $('f-name').textContent = 'UNKNOWN';
+        $('f-name').className   = 'face-name unknown';
+      }
+      if(conf) $('f-conf').textContent = 'Confidence: '+conf;
+      if(loc)  $('f-loc').textContent  = '@ '+loc;
+
+      /* Events */
+      renderEvents(d.events);
+
+      /* Uptime */
+      $('uptime').textContent = 'NODE_1 uptime: '+fmt_up(d.up||0);
+      $('rtag').textContent   = 'LIVE  ●';
+    })
+    .catch(()=>{
+      $('rtag').textContent='NO SIGNAL';
+    });
+}
+
+/* ── CONTROL COMMAND ── */
+function cmd(pin, label){
+  fetch('/blynk?pin=V'+pin).catch(()=>{});
+  toast('► '+label+' sent (V'+pin+')');
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

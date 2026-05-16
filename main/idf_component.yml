@@ -1,20 +1,20 @@
-## IDF Component Manager Manifest File
-dependencies:
-  ## Required IDF version
-  idf:
-    version: '>=4.1.0'
-  # # Put list of dependencies here
-  # # For components maintained by Espressif:
-  # component: "~1.0.0"
-  # # For 3rd party components:
-  # username/component: ">=1.0.0,<2.0.0"
-  # username2/component2:
-  #   version: "~1.0.0"
-  #   # For transient dependencies `public` flag can be set.
-  #   # `public` flag doesn't have an effect dependencies of the `main` component.
-  #   # All dependencies of `main` are public by default.
-  #   public: true
-  espressif/mqtt: '*'
+## idf_component.yml  -  NODE_1 managed component manifest
+#
+# This file tells the IDF component manager which managed components
+# this project uses.  Without it, "espressif__cjson" in REQUIRES is
+# resolved but the manager doesn't know to fetch/include its headers.
+#
+# IDF v6 cJSON note:
+#   The managed component "espressif/cjson" replaces the old built-in
+#   "json" component.  Both the REQUIRES name (espressif__cjson) and
+#   the dependency name here (espressif/cjson) must be used — they
+#   refer to the same package.
+#
+# Run  idf.py update-dependencies  after adding new entries here.
 
-  espressif/esp-sr:
-    version: ">=1.0.0"
+dependencies:
+  idf:
+    version: ">=5.0.0"
+
+  espressif/cjson:
+    version: ">=1.7.14"

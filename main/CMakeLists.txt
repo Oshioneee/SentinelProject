@@ -1,8 +1,34 @@
 idf_component_register(
-    SRCS "main.c"
-    INCLUDE_DIRS "."
-    REQUIRES esp-sr esp_driver_i2s esp_timer esp_driver_gpio esp_driver_ledc freertos
-)
+    SRCS
+        "main.c"
+        "wifi.c"
+        "espnow.c"
+        "http_client.c"
+        "face_verify.c"
+        "blynk.c"
 
-# Optional: If you plan to play sounds (WAV files) later, 
-# you might want to add 'esp_codec_dev' to PRIV_REQUIRES as well.
+    INCLUDE_DIRS
+        "."
+
+    REQUIRES
+        freertos
+        nvs_flash
+        heap
+        log
+        esp_timer        # <-- added: provides esp_timer.h
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_client
+        esp_http_server
+        mbedtls
+        espressif__cjson
+        driver
+        esp_driver_gpio
+        esp_driver_i2s
+        esp_driver_ledc
+        esp-sr
+    
+    EMBED_FILES
+        "dashboard.html"
+)
