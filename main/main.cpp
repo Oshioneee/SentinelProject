@@ -28,6 +28,7 @@
 #include "esp_mn_speech_commands.h"
 #include "esp_wn_models.h"
 
+extern "C" {
 #include "blynk.h"
 #include "config.h"
 #include "espnow.h"
@@ -39,6 +40,10 @@
 /* Dashboard HTML */
 extern const uint8_t dashboard_html_start[] asm("_binary_dashboard_html_start");
 extern const uint8_t dashboard_html_end[] asm("_binary_dashboard_html_end");
+}
+
+/* Edge Impulse SDK */
+#include "edge-impulse-sdk/classifier/ei_run_classifier.h"
 
 static const char *TAG = "SENTINEL";
 
@@ -77,6 +82,70 @@ static const char *TAG = "SENTINEL";
 
 #define MIN_COMMAND_CONFIDENCE 0.10f
 #define CMD_COUNT 15
+
+/* Edge Impulse Static Ring Buffer & State Definitions */
+#define EI_SAMPLE_COUNT 16000
+static int16_t ei_audio_ring_buf[EI_SAMPLE_COUNT] = {0};
+static int ei_ring_buf_head = 0;
+static SemaphoreHandle_t g_ei_audio_mutex = NULL;
+static int16_t local_inference_buf[EI_SAMPLE_COUNT] = {0};
+static volatile bool g_ei_wakeup_triggered = false;
+static volatile bool g_ei_listening = false;
+
+static int get_audio_data(size_t offset, size_t length, float *out_ptr) {
+  for (size_t i = 0; i < length; i++) {
+    out_ptr[i] = (float)local_inference_buf[offset + i];
+  }
+  return 0;
+}
+
+static void ei_task(void *pvParameters) {
+  ESP_LOGI(TAG, "Edge Impulse continuous classifier task active.");
+  
+  while (1) {
+    vTaskDelay(pdMS_TO_TICKS(250)); // Run classifier 4 times per second (750ms overlap)
+    
+    if (!g_ei_audio_mutex)
+      continue;
+      
+    if (xSemaphoreTake(g_ei_audio_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+      int head = ei_ring_buf_head;
+      int first_part = EI_SAMPLE_COUNT - head;
+      memcpy(local_inference_buf, &ei_audio_ring_buf[head], first_part * sizeof(int16_t));
+      if (head > 0) {
+        memcpy(&local_inference_buf[first_part], ei_audio_ring_buf, head * sizeof(int16_t));
+      }
+      xSemaphoreGive(g_ei_audio_mutex);
+    } else {
+      continue; // Skip classification if buffer is locked (ensures no real-time drops)
+    }
+    
+    signal_t signal;
+    signal.total_length = EI_SAMPLE_COUNT;
+    signal.get_data = &get_audio_data;
+    
+    ei_impulse_result_t result = {0};
+    EI_IMPULSE_ERROR r = run_classifier(&signal, &result, false);
+    if (r != EI_IMPULSE_OK) {
+      ESP_LOGE(TAG, "run_classifier failed: %d", r);
+      continue;
+    }
+    
+    float sentinel_val = result.classification[1].value;
+    float noise_val = result.classification[0].value;
+    float unknown_val = result.classification[2].value;
+    
+    if (sentinel_val >= 0.15f) {
+      ESP_LOGI(TAG, "[EI Classifier] sentinel: %.2f  noise: %.2f  unknown: %.2f", 
+               (double)sentinel_val, (double)noise_val, (double)unknown_val);
+    }
+    
+    if (sentinel_val >= 0.35f && !g_ei_listening) {
+      ESP_LOGW(TAG, ">>> EI WAKE WORD DETECTED (score: %.2f)!", (double)sentinel_val);
+      g_ei_wakeup_triggered = true;
+    }
+  }
+}
 
 typedef struct {
   const char *phrase;
@@ -611,25 +680,23 @@ static void init_gpio(void) {
 }
 
 static void init_servo_channel(ledc_channel_t ch, gpio_num_t pin) {
-  ledc_channel_config_t ch_cfg = {
-      .gpio_num = pin,
-      .speed_mode = LEDC_LOW_SPEED_MODE,
-      .channel = ch,
-      .timer_sel = LEDC_TIMER_0,
-      .duty = SERVO_DUTY_CLOSED,
-      .hpoint = 0,
-  };
+  ledc_channel_config_t ch_cfg = {};
+  ch_cfg.gpio_num = pin;
+  ch_cfg.speed_mode = LEDC_LOW_SPEED_MODE;
+  ch_cfg.channel = ch;
+  ch_cfg.timer_sel = LEDC_TIMER_0;
+  ch_cfg.duty = SERVO_DUTY_CLOSED;
+  ch_cfg.hpoint = 0;
   ledc_channel_config(&ch_cfg);
 }
 
 static void init_servos(void) {
-  ledc_timer_config_t timer_cfg = {
-      .speed_mode = LEDC_LOW_SPEED_MODE,
-      .duty_resolution = SERVO_TIMER_RES,
-      .timer_num = LEDC_TIMER_0,
-      .freq_hz = SERVO_FREQ_HZ,
-      .clk_cfg = LEDC_AUTO_CLK,
-  };
+  ledc_timer_config_t timer_cfg = {};
+  timer_cfg.speed_mode = LEDC_LOW_SPEED_MODE;
+  timer_cfg.duty_resolution = SERVO_TIMER_RES;
+  timer_cfg.timer_num = LEDC_TIMER_0;
+  timer_cfg.freq_hz = SERVO_FREQ_HZ;
+  timer_cfg.clk_cfg = LEDC_AUTO_CLK;
   ledc_timer_config(&timer_cfg);
 
   init_servo_channel(BEDROOM_SERVO_1_CH, BEDROOM_SERVO_1_PIN);
@@ -768,33 +835,28 @@ static void init_mic(void) {
       I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   i2s_new_channel(&chan_cfg, NULL, &rx_chan);
 
-  i2s_std_config_t std_cfg = {
-      .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
-      .slot_cfg =
-          {
-              .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
-              .slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT,
-              .slot_mode = I2S_SLOT_MODE_MONO,
-              .slot_mask = I2S_STD_SLOT_LEFT,
-              .ws_width = 32,
-              .ws_pol = false,
-              .bit_shift = true,
-              .left_align = true,
-              .big_endian = false,
-              .bit_order_lsb = false,
-          },
-      .gpio_cfg =
-          {
-              .bclk = I2S_BCLK_IO,
-              .ws = I2S_WS_IO,
-              .din = I2S_DIN_IO,
-              .dout = I2S_GPIO_UNUSED,
-              .mclk = I2S_GPIO_UNUSED,
-              .invert_flags = {.mclk_inv = false,
-                               .bclk_inv = false,
-                               .ws_inv = false},
-          },
-  };
+  i2s_std_config_t std_cfg = {};
+  std_cfg.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000);
+  
+  std_cfg.slot_cfg.data_bit_width = I2S_DATA_BIT_WIDTH_32BIT;
+  std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
+  std_cfg.slot_cfg.slot_mode = I2S_SLOT_MODE_MONO;
+  std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
+  std_cfg.slot_cfg.ws_width = 32;
+  std_cfg.slot_cfg.ws_pol = false;
+  std_cfg.slot_cfg.bit_shift = true;
+  std_cfg.slot_cfg.left_align = true;
+  std_cfg.slot_cfg.big_endian = false;
+  std_cfg.slot_cfg.bit_order_lsb = false;
+  
+  std_cfg.gpio_cfg.mclk = I2S_GPIO_UNUSED;
+  std_cfg.gpio_cfg.bclk = I2S_BCLK_IO;
+  std_cfg.gpio_cfg.ws = I2S_WS_IO;
+  std_cfg.gpio_cfg.din = I2S_DIN_IO;
+  std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
+  std_cfg.gpio_cfg.invert_flags.mclk_inv = false;
+  std_cfg.gpio_cfg.invert_flags.bclk_inv = false;
+  std_cfg.gpio_cfg.invert_flags.ws_inv = false;
   i2s_channel_init_std_mode(rx_chan, &std_cfg);
   i2s_channel_enable(rx_chan);
   ESP_LOGI(TAG, "Microphone initialized.");
@@ -802,8 +864,8 @@ static void init_mic(void) {
 
 static void feed_task(void *arg) {
   int chunksize = g_afe_handle->get_feed_chunksize(g_afe_data);
-  int32_t *i2s_buff32 = malloc(chunksize * sizeof(int32_t));
-  int16_t *i2s_buff16 = malloc(chunksize * sizeof(int16_t));
+  int32_t *i2s_buff32 = (int32_t *)malloc(chunksize * sizeof(int32_t));
+  int16_t *i2s_buff16 = (int16_t *)malloc(chunksize * sizeof(int16_t));
   assert(i2s_buff32 && i2s_buff16);
 
   int32_t sample_sum = 0;
@@ -837,6 +899,15 @@ static void feed_task(void *arg) {
       chunk_cnt = 0;
     }
 
+    /* Duplicate stream to Edge Impulse Circular Buffer */
+    if (g_ei_audio_mutex && xSemaphoreTake(g_ei_audio_mutex, 0) == pdTRUE) {
+      for (int i = 0; i < chunksize; i++) {
+        ei_audio_ring_buf[ei_ring_buf_head] = i2s_buff16[i];
+        ei_ring_buf_head = (ei_ring_buf_head + 1) % EI_SAMPLE_COUNT;
+      }
+      xSemaphoreGive(g_ei_audio_mutex);
+    }
+
     g_afe_handle->feed(g_afe_data, i2s_buff16);
   }
 }
@@ -863,22 +934,23 @@ static void detect_task(void *arg) {
   esp_mn_commands_update();
   esp_mn_commands_print();
 
-  bool listening = false;
-  ESP_LOGI(TAG, "=== SENTINEL ACTIVE (MN7) === Say 'Hi ESP'");
+  g_ei_listening = false;
+  ESP_LOGI(TAG, "=== SENTINEL ACTIVE (MN7) === Say your wake word");
 
   while (1) {
     afe_fetch_result_t *res = g_afe_handle->fetch(g_afe_data);
     if (!res || res->ret_value == ESP_FAIL)
       continue;
 
-    if (res->wakeup_state == WAKENET_DETECTED) {
-      ESP_LOGW(TAG, ">>> WAKE WORD DETECTED");
+    /* Custom Wake Trigger from Edge Impulse Classifier */
+    if (g_ei_wakeup_triggered) {
+      g_ei_wakeup_triggered = false;
       gpio_set_level(BLUE_LED_PIN, 1);
       multinet->clean(mn_data);
-      listening = true;
+      g_ei_listening = true;
     }
 
-    if (listening) {
+    if (g_ei_listening) {
       esp_mn_state_t mn_state = multinet->detect(mn_data, res->data);
 
       switch (mn_state) {
@@ -895,12 +967,12 @@ static void detect_task(void *arg) {
         } else {
           trigger_feedback(BEEP_DOUBLE);
         }
-        listening = false;
+        g_ei_listening = false;
         break;
       }
       case ESP_MN_STATE_TIMEOUT:
         gpio_set_level(BLUE_LED_PIN, 0);
-        listening = false;
+        g_ei_listening = false;
         break;
       default:
         break;
@@ -912,7 +984,7 @@ static void detect_task(void *arg) {
 /* ================================================================
    APP_MAIN
    ================================================================ */
-void app_main(void) {
+extern "C" void app_main(void) {
   ESP_LOGI(TAG, "=== NODE_1 Master (ESP32-S3) booting ===");
 
   esp_err_t nvs_err = nvs_flash_init();
@@ -955,6 +1027,9 @@ void app_main(void) {
     return;
   }
 
+  /* Initialize Edge Impulse audio mutex */
+  g_ei_audio_mutex = xSemaphoreCreateMutex();
+
   afe_config_t *afe_config =
       afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
   if (!afe_config) {
@@ -962,10 +1037,10 @@ void app_main(void) {
     return;
   }
 
+  /* Disable Espressif WakeNet to free massive SRAM memory */
   afe_config->aec_init = false;
-  afe_config->wakenet_model_name =
-      esp_srmodel_filter(models, ESP_WN_PREFIX, NULL);
-  afe_config->wakenet_init = true;
+  afe_config->wakenet_model_name = NULL;
+  afe_config->wakenet_init = false;
   afe_config->wakenet_mode = DET_MODE_90;
 
   g_afe_handle = (esp_afe_sr_iface_t *)esp_afe_handle_from_config(afe_config);
@@ -979,6 +1054,10 @@ void app_main(void) {
   if (xTaskCreatePinnedToCore(detect_task, "detect", 16384, (void *)models, 5,
                               NULL, 1) != pdPASS) {
     ESP_LOGE(TAG, "Failed to create detect_task (out of memory?)");
+  }
+  if (xTaskCreatePinnedToCore(ei_task, "ei_infer", 8192, NULL, 5, NULL, 1) !=
+      pdPASS) {
+    ESP_LOGE(TAG, "Failed to create ei_task (out of memory?)");
   }
 
   ESP_LOGI(TAG, "=== NODE_1 ready - Voice + Mesh active ===");
