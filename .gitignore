@@ -17,3 +17,7 @@ Thumbs.db
 # Python
 __pycache__/
 *.py[cod]
+
+# Edge Impulse library
+components/edge_impulse/
+

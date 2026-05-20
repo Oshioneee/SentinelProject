@@ -72,6 +72,8 @@ static const char *TAG = "SENTINEL";
 
 #define LOCKDOWN_PIN GPIO_NUM_16
 #define BUZZER_PIN GPIO_NUM_17
+#define BLUE_LED_PIN GPIO_NUM_18
+#define GREEN_LED_PIN GPIO_NUM_19
 
 #define MIN_COMMAND_CONFIDENCE 0.10f
 #define CMD_COUNT 15
@@ -583,7 +585,8 @@ static void init_gpio(void) {
   uint64_t output_pins =
       (1ULL << KITCHEN_LIGHT_PIN) | (1ULL << BEDROOM_LIGHT_PIN) |
       (1ULL << PARLOUR_LIGHT_PIN) | (1ULL << OUTSIDE_LIGHT_PIN) |
-      (1ULL << COOLING_PIN) | (1ULL << LOCKDOWN_PIN) | (1ULL << BUZZER_PIN);
+      (1ULL << COOLING_PIN) | (1ULL << LOCKDOWN_PIN) | (1ULL << BUZZER_PIN) |
+      (1ULL << BLUE_LED_PIN) | (1ULL << GREEN_LED_PIN);
 
   gpio_config_t io_conf = {
       .pin_bit_mask = output_pins,
@@ -601,6 +604,8 @@ static void init_gpio(void) {
   gpio_set_level(COOLING_PIN, 0);
   gpio_set_level(LOCKDOWN_PIN, 0);
   gpio_set_level(BUZZER_PIN, 0);
+  gpio_set_level(BLUE_LED_PIN, 0);
+  gpio_set_level(GREEN_LED_PIN, 0);
 
   ESP_LOGI(TAG, "GPIO initialized.");
 }
@@ -868,7 +873,7 @@ static void detect_task(void *arg) {
 
     if (res->wakeup_state == WAKENET_DETECTED) {
       ESP_LOGW(TAG, ">>> WAKE WORD DETECTED");
-      trigger_feedback(BEEP_SINGLE);
+      gpio_set_level(BLUE_LED_PIN, 1);
       multinet->clean(mn_data);
       listening = true;
     }
@@ -881,8 +886,12 @@ static void detect_task(void *arg) {
         break;
       case ESP_MN_STATE_DETECTED: {
         esp_mn_results_t *mn_res = multinet->get_results(mn_data);
+        gpio_set_level(BLUE_LED_PIN, 0);
         if (mn_res->prob[0] >= MIN_COMMAND_CONFIDENCE) {
+          gpio_set_level(GREEN_LED_PIN, 1);
           handle_command(mn_res->command_id[0]);
+          vTaskDelay(pdMS_TO_TICKS(1000)); // Keep green LED on for 1s
+          gpio_set_level(GREEN_LED_PIN, 0);
         } else {
           trigger_feedback(BEEP_DOUBLE);
         }
@@ -890,6 +899,7 @@ static void detect_task(void *arg) {
         break;
       }
       case ESP_MN_STATE_TIMEOUT:
+        gpio_set_level(BLUE_LED_PIN, 0);
         listening = false;
         break;
       default:

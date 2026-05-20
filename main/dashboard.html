@@ -1,500 +1,581 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>SENTINEL</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>SENTINEL // NODE_1</title>
 <style>
-/* ═══════════════════════════════════════════════
-   SENTINEL Dashboard  –  self-contained, no CDN
-   Aesthetic: military NOC / SOC terminal
-   Fonts: system monospace + system sans
-   ═══════════════════════════════════════════════ */
-:root{
-  --bg:        #06080c;
-  --card:      #0b0f16;
-  --card2:     #10161f;
-  --border:    #182030;
-  --border2:   #1e2d40;
-  --ok:        #00e676;
-  --ok-glow:   rgba(0,230,118,.18);
-  --ok-dim:    rgba(0,230,118,.08);
-  --danger:    #ff3d3d;
-  --danger-glow: rgba(255,61,61,.18);
-  --danger-dim:  rgba(255,61,61,.08);
-  --warn:      #ffa726;
-  --warn-glow: rgba(255,167,38,.18);
-  --warn-dim:  rgba(255,167,38,.08);
-  --blue:      #40c4ff;
-  --text:      #c0d0e0;
-  --text2:     #7a9ab8;
-  --muted:     #344a5e;
-  --mono: 'Courier New',Courier,'Lucida Console',monospace;
-  --sans: -apple-system,'Segoe UI',system-ui,sans-serif;
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+ 
+:root {
+  --bg:#020508;--surface:#040c14;--panel:#060f1a;--rim:#0a1f30;--rim2:#0d2840;
+  --teal:#00e5ff;--teal-dim:rgba(0,229,255,.12);--teal-glow:rgba(0,229,255,.06);
+  --green:#00e676;--green-dim:rgba(0,230,118,.12);
+  --red:#ff1744;--red-dim:rgba(255,23,68,.12);
+  --amber:#ffab00;--amber-dim:rgba(255,171,0,.12);
+  --purple:#d500f9;--purple-dim:rgba(213,0,249,.12);
+  --text:#b0cce0;--text2:#4a7a9a;--muted:#1e3a50;
+  --scan:rgba(0,229,255,.015);--shadow:rgba(0,0,0,.5);
+  --mono:'Share Tech Mono','Courier New',monospace;--head:'Orbitron',monospace;
 }
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html{scroll-behavior:smooth}
-body{
-  background:var(--bg);
-  color:var(--text);
-  font-family:var(--mono);
-  font-size:13px;
-  min-height:100vh;
+[data-theme="light"] {
+  --bg:#eef2f7;--surface:#e0e8f0;--panel:#fff;--rim:#c4d4e4;--rim2:#aabece;
+  --teal:#006d88;--teal-dim:rgba(0,109,136,.10);--teal-glow:rgba(0,109,136,.05);
+  --green:#007a50;--green-dim:rgba(0,122,80,.10);
+  --red:#c0000a;--red-dim:rgba(192,0,10,.08);
+  --amber:#b85000;--amber-dim:rgba(184,80,0,.08);
+  --purple:#7b00a8;--purple-dim:rgba(123,0,168,.08);
+  --text:#162433;--text2:#345870;--muted:#7a9aae;
+  --scan:rgba(0,109,136,.010);--shadow:rgba(0,60,120,.10);
 }
-/* subtle green scanline grid */
-body::before{
-  content:'';
-  position:fixed;inset:0;
-  background-image:
-    linear-gradient(rgba(0,230,118,.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,230,118,.018) 1px, transparent 1px);
-  background-size:44px 44px;
-  pointer-events:none;z-index:0;
-}
-/* vignette */
-body::after{
-  content:'';
-  position:fixed;inset:0;
-  background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.65) 100%);
-  pointer-events:none;z-index:0;
-}
-#root{position:relative;z-index:1;max-width:480px;margin:0 auto;padding:10px 10px 20px}
-
-/* ══ TOPBAR ══ */
-.topbar{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:10px 14px;
-  background:var(--card);
-  border:1px solid var(--border2);
-  border-radius:12px;
-  margin-bottom:10px;
-}
-.logo{
-  font-family:var(--sans);
-  font-size:15px;font-weight:800;
-  letter-spacing:.25em;
-  color:var(--ok);
-  text-shadow:0 0 16px var(--ok-glow);
-}
-.logo sub{font-size:9px;color:var(--muted);font-weight:400;letter-spacing:.05em}
-.node-strip{display:flex;gap:10px;align-items:center}
-.ndot-wrap{display:flex;flex-direction:column;align-items:center;gap:3px}
-.ndot-wrap .lbl{font-size:8px;color:var(--muted);letter-spacing:.05em}
-.ndot{
-  width:10px;height:10px;border-radius:50%;
-  background:var(--muted);
-  transition:background .4s,box-shadow .4s;
-}
-.ndot.on { background:var(--ok);    box-shadow:0 0 8px var(--ok),0 0 16px var(--ok-glow) }
-.ndot.off{ background:var(--danger);box-shadow:0 0 6px var(--danger) }
-.topbar-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-.time-disp{font-size:13px;color:var(--text)}
-.refresh-tag{font-size:9px;color:var(--muted);letter-spacing:.05em}
-
-/* ══ ALERT STRIP ══ */
-.alert-strip{
-  display:grid;grid-template-columns:1fr 1fr 1fr;
-  gap:8px;margin-bottom:10px;
-}
-.pill{
-  display:flex;flex-direction:column;align-items:center;gap:5px;
-  padding:11px 6px;border-radius:12px;
-  border:1px solid var(--border);
-  background:var(--card);
-  transition:all .3s;
-}
-.pill .p-ico{font-size:19px}
-.pill .p-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
-.pill .p-val{font-size:11px;font-weight:bold;letter-spacing:.06em;transition:color .3s}
-/* states */
-.pill.ok   { border-color:var(--border) }
-.pill.ok .p-val { color:var(--ok) }
-.pill.danger{
-  border-color:var(--danger);
-  background:var(--danger-dim);
-  animation:alarm 1s ease-in-out infinite;
-}
-.pill.danger .p-val{ color:var(--danger) }
-.pill.warn  { border-color:var(--warn); background:var(--warn-dim) }
-.pill.warn .p-val { color:var(--warn) }
-@keyframes alarm{
-  0%,100%{box-shadow:0 0 0 0 var(--danger-dim)}
-  50%{box-shadow:0 0 0 8px transparent}
-}
-
-/* ══ SECTION DIVIDER ══ */
-.divider{
-  display:flex;align-items:center;gap:8px;
-  font-size:9px;color:var(--muted);letter-spacing:.14em;
-  text-transform:uppercase;margin:10px 0 7px;
-}
-.divider::before,.divider::after{
-  content:'';flex:1;height:1px;background:var(--border);
-}
-.divider::before{flex:0 0 6px}
-
-/* ══ GAS GRID ══ */
-.gas-grid{
-  display:grid;grid-template-columns:1fr 1fr;
-  gap:8px;margin-bottom:10px;
-}
-.gas-card{
-  background:var(--card);border:1px solid var(--border);
-  border-radius:12px;padding:12px 12px 10px;
-  transition:border-color .4s,box-shadow .4s;
-}
-.gas-card.over{
-  border-color:var(--danger);
-  box-shadow:inset 0 0 0 1px var(--danger-dim);
-}
-.gas-head{
-  display:flex;justify-content:space-between;align-items:baseline;
-  margin-bottom:6px;
-}
-.gas-name{font-size:10px;color:var(--text2)}
-.gas-max {font-size:9px;color:var(--muted)}
-.gas-reading{
-  font-size:26px;line-height:1;color:var(--text);
-  margin-bottom:8px;letter-spacing:-.02em;
-}
-.gas-reading em{font-style:normal;font-size:10px;color:var(--muted);margin-left:2px}
-.gas-track{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
-.gas-fill{
-  height:100%;border-radius:2px;
-  transition:width .7s ease,background .4s;
-  background:var(--ok);
-}
-
-/* ══ FACE CARD ══ */
-.face-card{
-  background:var(--card);border:1px solid var(--border);
-  border-radius:12px;padding:12px;
-  margin-bottom:10px;
-}
-.face-inner{display:flex;align-items:center;gap:12px}
-.face-avatar{
-  width:50px;height:50px;border-radius:10px;
-  background:var(--card2);border:1px solid var(--border2);
-  display:flex;align-items:center;justify-content:center;
-  font-size:24px;flex-shrink:0;
-}
-.face-name{font-size:20px;color:var(--ok);letter-spacing:.02em;transition:color .3s}
-.face-name.unknown{color:var(--danger)}
-.face-sub{font-size:10px;color:var(--text2);margin-top:3px}
-.face-loc{font-size:10px;color:var(--blue);margin-top:2px}
-
-/* ══ EVENT LOG ══ */
-.event-card{
-  background:var(--card);border:1px solid var(--border);
-  border-radius:12px;overflow:hidden;margin-bottom:10px;
-}
-.ev-row{
-  display:flex;align-items:flex-start;gap:9px;
-  padding:9px 12px;border-bottom:1px solid var(--border);
-}
-.ev-row:last-child{border-bottom:none}
-.ev-row.new{animation:slid .35s ease}
-@keyframes slid{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
-.ev-dot{
-  width:7px;height:7px;border-radius:50%;
-  margin-top:3px;flex-shrink:0;
-}
-.ev-dot.ok    {background:var(--ok)   }
-.ev-dot.warn  {background:var(--warn) }
-.ev-dot.danger{background:var(--danger)}
-.ev-body{flex:1}
-.ev-msg{font-size:11px;color:var(--text);line-height:1.4}
-.ev-time{font-size:9px;color:var(--muted);margin-top:2px}
-
-/* ══ CONTROLS ══ */
-.ctrl-grid{
-  display:grid;grid-template-columns:1fr 1fr;
-  gap:8px;margin-bottom:10px;
-}
-.ctrl-btn{
-  display:flex;flex-direction:column;align-items:center;gap:7px;
-  padding:13px 8px;border-radius:12px;
-  border:1px solid var(--border);
-  background:var(--card);color:var(--text);
-  cursor:pointer;font-family:var(--mono);
-  font-size:10px;letter-spacing:.05em;
-  text-transform:uppercase;
-  transition:all .15s;
-  user-select:none;
-}
-.ctrl-btn:hover{ border-color:var(--border2);background:var(--card2) }
-.ctrl-btn:active{transform:scale(.96);opacity:.8}
-.ctrl-btn .ico{font-size:22px}
-.ctrl-btn .pin{font-size:9px;color:var(--muted)}
-.ctrl-btn.blue  {border-color:#1a3050}
-.ctrl-btn.blue:hover {border-color:#40c4ff;box-shadow:0 0 10px rgba(64,196,255,.1)}
-.ctrl-btn.green {border-color:#0d2b1a}
-.ctrl-btn.green:hover{border-color:var(--ok);box-shadow:0 0 10px var(--ok-dim)}
-.ctrl-btn.amber {border-color:#2b1a0d}
-.ctrl-btn.amber:hover{border-color:var(--warn);box-shadow:0 0 10px var(--warn-dim)}
-.ctrl-btn.red   {border-color:#2b0d0d}
-.ctrl-btn.red:hover  {border-color:var(--danger);box-shadow:0 0 10px var(--danger-dim)}
-
-/* ══ TOAST ══ */
-#toast{
-  position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);
-  background:var(--card2);border:1px solid var(--border2);
-  border-radius:20px;padding:8px 18px;
-  font-size:11px;color:var(--ok);
-  transition:transform .25s ease;pointer-events:none;
-  white-space:nowrap;z-index:99;
-}
-#toast.show{transform:translateX(-50%) translateY(0)}
-
-/* ══ FOOTER ══ */
-.footer{text-align:center;font-size:10px;color:var(--muted);padding:6px 0}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px;min-height:100dvh;overflow-x:hidden;transition:background .35s,color .35s;}
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;background:repeating-linear-gradient(0deg,var(--scan) 0,var(--scan) 1px,transparent 1px,transparent 3px);}
+body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 60% 40% at 15% 0%,rgba(0,229,255,.04),transparent 70%),radial-gradient(ellipse 40% 30% at 85% 100%,rgba(0,230,118,.03),transparent 70%);transition:opacity .35s;}
+[data-theme="light"] body::after{opacity:.2;}
+#app{position:relative;z-index:1;max-width:460px;margin:0 auto;padding:10px 10px 28px;}
+ 
+/* HEADER */
+header{display:grid;grid-template-columns:1fr auto;align-items:start;padding:12px 14px;margin-bottom:10px;background:var(--panel);border:1px solid var(--rim2);border-radius:4px 16px 4px 16px;position:relative;overflow:hidden;box-shadow:0 2px 12px var(--shadow);transition:background .35s,border-color .35s;}
+header::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:linear-gradient(180deg,var(--teal),transparent);}
+.brand-name{font-family:var(--head);font-size:18px;font-weight:900;letter-spacing:.2em;color:var(--teal);text-shadow:0 0 20px var(--teal-dim);}
+[data-theme="light"] .brand-name{text-shadow:none;}
+.brand-sub{font-size:9px;letter-spacing:.22em;color:var(--text2);text-transform:uppercase;margin-top:2px;}
+.header-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;}
+.theme-btn{background:var(--surface);border:1px solid var(--rim2);border-radius:16px;padding:3px 10px;font-family:var(--mono);font-size:9px;color:var(--text2);cursor:pointer;transition:all .2s;user-select:none;}
+.theme-btn:hover{border-color:var(--teal);color:var(--teal);}
+.nodes{display:flex;gap:8px;}
+.node-ind{display:flex;flex-direction:column;align-items:center;gap:3px;}
+.node-ind .nl{font-size:8px;color:var(--text2);}
+.ndot{width:8px;height:8px;border-radius:50%;background:var(--muted);transition:background .5s,box-shadow .5s;}
+.ndot.on{background:var(--green);box-shadow:0 0 6px var(--green);}
+.ndot.off{background:var(--red);box-shadow:0 0 4px var(--red);}
+#clock{font-size:13px;color:var(--text);letter-spacing:.08em;}
+#rtag{font-size:8px;color:var(--text2);letter-spacing:.1em;}
+#rtag.live{color:var(--green);}
+ 
+/* ALERT STRIP */
+.alert-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px;}
+.alert-pill{display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 6px 8px;background:var(--panel);border:1px solid var(--rim);border-radius:10px;position:relative;overflow:hidden;box-shadow:0 1px 6px var(--shadow);transition:all .35s;}
+.alert-pill::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--muted);transition:background .35s,box-shadow .35s;}
+.alert-pill.ok::after{background:var(--green);box-shadow:0 0 8px var(--green);}
+.alert-pill.warn::after{background:var(--amber);box-shadow:0 0 8px var(--amber);}
+.alert-pill.danger::after{background:var(--red);box-shadow:0 0 8px var(--red);}
+.alert-pill.danger{background:var(--red-dim);border-color:rgba(255,23,68,.3);animation:pulsed 1.2s ease-in-out infinite;}
+.alert-pill.warn{background:var(--amber-dim);border-color:rgba(255,171,0,.25);}
+@keyframes pulsed{0%,100%{box-shadow:none;}50%{box-shadow:0 0 0 5px rgba(255,23,68,.06);border-color:var(--red);}}
+.ap-ico{font-size:17px;}.ap-lbl{font-size:8px;color:var(--text2);letter-spacing:.08em;text-transform:uppercase;}
+.ap-val{font-size:10px;font-weight:bold;letter-spacing:.06em;color:var(--text2);transition:color .3s;}
+.alert-pill.ok .ap-val{color:var(--green);}.alert-pill.warn .ap-val{color:var(--amber);}.alert-pill.danger .ap-val{color:var(--red);}
+ 
+/* SECTION LABEL */
+.sect{display:flex;align-items:center;gap:8px;font-size:8px;color:var(--text2);letter-spacing:.18em;text-transform:uppercase;margin:12px 0 8px;}
+.sect span{white-space:nowrap;}
+.sect::after{content:'';flex:1;height:1px;background:var(--rim2);}
+ 
+/* SENSOR SPLIT */
+.sensor-split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;}
+.sensor-group{background:var(--panel);border:1px solid var(--rim);border-radius:12px;padding:10px 10px 9px;position:relative;overflow:hidden;box-shadow:0 1px 6px var(--shadow);transition:border-color .35s,background .35s;}
+.sensor-group::before{content:'';position:absolute;top:0;left:0;width:2px;height:100%;}
+.sensor-group.gas-group::before{background:var(--amber);}
+.sensor-group.smoke-group::before{background:var(--purple);}
+.sensor-group.alarm-gas{border-color:rgba(255,171,0,.5);background:var(--amber-dim);animation:pulsed-a 1.3s ease-in-out infinite;}
+.sensor-group.alarm-smoke{border-color:rgba(213,0,249,.4);background:var(--purple-dim);animation:pulsed-p 1.3s ease-in-out infinite;}
+@keyframes pulsed-a{0%,100%{box-shadow:none;}50%{box-shadow:0 0 0 4px rgba(255,171,0,.08);}}
+@keyframes pulsed-p{0%,100%{box-shadow:none;}50%{box-shadow:0 0 0 4px rgba(213,0,249,.08);}}
+.sg-title{font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;padding-left:6px;}
+.sensor-group.gas-group .sg-title{color:var(--amber);}
+.sensor-group.smoke-group .sg-title{color:var(--purple);}
+.gas-row{display:flex;flex-direction:column;gap:7px;}
+.gr{display:flex;flex-direction:column;gap:2px;padding-left:6px;}
+.gr-head{display:flex;justify-content:space-between;align-items:baseline;}
+.gr-name{font-size:9px;color:var(--text2);}.gr-max{font-size:7px;color:var(--muted);}
+.gr-val{font-family:var(--head);font-size:19px;line-height:1;color:var(--text);transition:color .4s;}
+.gr-val em{font-style:normal;font-size:8px;color:var(--muted);margin-left:2px;}
+.gr-bar{height:2px;background:var(--rim2);border-radius:1px;overflow:hidden;margin-top:2px;}
+.gr-fill{height:100%;border-radius:1px;transition:width .8s cubic-bezier(.4,0,.2,1),background .4s;}
+.sensor-group.alarm-gas .gr-val,.sensor-group.alarm-smoke .gr-val{color:var(--red);}
+ 
+/* REMOTE CONTROLS */
+.remote-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;}
+.remote-card{background:var(--panel);border:1px solid var(--rim);border-radius:12px;padding:10px;box-shadow:0 1px 6px var(--shadow);}
+.rc-label{display:flex;align-items:center;gap:6px;margin-bottom:8px;}
+.rc-ico{font-size:16px;}.rc-name{font-size:9px;color:var(--text2);letter-spacing:.06em;text-transform:uppercase;}
+.rc-sub{font-size:7px;color:var(--muted);margin-left:auto;}
+.rc-btns{display:flex;gap:5px;}
+.rc-btn{flex:1;padding:6px 0;border-radius:7px;font-family:var(--mono);font-size:8px;letter-spacing:.06em;border:1px solid var(--rim2);background:var(--surface);color:var(--text2);cursor:pointer;transition:all .15s;user-select:none;}
+.rc-btn:active{transform:scale(.95);}
+.rc-btn.open-btn:hover{border-color:var(--green);color:var(--green);background:var(--green-dim);}
+.rc-btn.close-btn:hover{border-color:var(--red);color:var(--red);background:var(--red-dim);}
+.rc-btn.on-btn:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-dim);}
+.rc-btn.off-btn2:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-dim);}
+.rc-state{font-size:8px;font-weight:bold;letter-spacing:.06em;margin-top:5px;text-align:center;transition:color .3s;}
+.rc-state.open,.rc-state.on{color:var(--green);}
+.rc-state.closed,.rc-state.off{color:var(--muted);}
+ 
+/* APPLIANCES */
+.appliance-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;}
+.app-card{background:var(--panel);border:1px solid var(--rim);border-radius:12px;padding:10px 10px 8px;display:flex;flex-direction:column;gap:6px;box-shadow:0 1px 6px var(--shadow);position:relative;overflow:hidden;transition:all .3s;}
+.app-card::before{content:'';position:absolute;top:0;left:0;width:2px;height:100%;background:var(--muted);transition:background .3s;}
+.app-card.on{border-color:rgba(0,230,118,.3);background:var(--green-dim);}
+.app-card.on::before{background:var(--green);}
+.app-top{display:flex;align-items:center;gap:8px;}
+.app-ico{font-size:17px;flex-shrink:0;}
+.app-lbl{font-size:9px;color:var(--text2);}
+.app-state{font-size:11px;font-weight:bold;color:var(--muted);transition:color .3s;}
+.app-card.on .app-state{color:var(--green);}
+.app-override{display:flex;gap:4px;}
+.ovr-btn{flex:1;padding:5px 0;border-radius:6px;font-family:var(--mono);font-size:8px;letter-spacing:.06em;border:1px solid var(--rim2);background:var(--surface);color:var(--text2);cursor:pointer;transition:all .15s;user-select:none;}
+.ovr-btn:active{transform:scale(.95);}
+.ovr-btn.on-btn:hover{border-color:var(--green);color:var(--green);background:var(--green-dim);}
+.ovr-btn.off-btn:hover{border-color:var(--red);color:var(--red);background:var(--red-dim);}
+.app-card.on .ovr-btn.on-btn{border-color:var(--green);color:var(--green);background:var(--green-dim);}
+ 
+/* FACE CARD */
+.face-card{background:var(--panel);border:1px solid var(--rim);border-radius:12px;padding:12px;margin-bottom:10px;position:relative;overflow:hidden;box-shadow:0 1px 6px var(--shadow);transition:background .35s,border-color .35s;}
+.face-row{display:flex;align-items:flex-start;gap:12px;}
+.face-photo{width:64px;height:64px;border-radius:10px;flex-shrink:0;border:1px solid var(--rim2);background:var(--surface);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px;transition:border-color .3s;}
+.face-photo img{width:100%;height:100%;object-fit:cover;display:none;}
+.face-photo img.loaded{display:block;}
+.face-card.granted .face-photo{border-color:rgba(0,230,118,.5);}
+.face-card.denied  .face-photo{border-color:rgba(255,23,68,.5);}
+.face-info{flex:1;min-width:0;}
+.face-name{font-family:var(--head);font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text2);transition:color .3s;}
+.face-card.granted .face-name{color:var(--green);}
+.face-card.denied  .face-name{color:var(--red);}
+.face-meta{font-size:10px;color:var(--text2);margin-top:2px;}
+.face-loc{font-size:9px;color:var(--teal);margin-top:2px;}
+.face-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:bold;letter-spacing:.1em;margin-top:5px;}
+.face-badge.g{background:rgba(0,230,118,.15);color:var(--green);border:1px solid rgba(0,230,118,.3);}
+.face-badge.d{background:rgba(255,23,68,.15);color:var(--red);border:1px solid rgba(255,23,68,.3);}
+ 
+/* EVENT LOG */
+.ev-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 0;margin-bottom:-2px;}
+.ev-header-lbl{font-size:8px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;}
+.dl-btn{background:var(--surface);border:1px solid var(--rim2);border-radius:12px;padding:3px 10px;font-family:var(--mono);font-size:8px;color:var(--text2);cursor:pointer;transition:all .2s;text-decoration:none;display:inline-block;letter-spacing:.05em;}
+.dl-btn:hover{border-color:var(--teal);color:var(--teal);}
+.ev-card{background:var(--panel);border:1px solid var(--rim);border-radius:12px;overflow:hidden;margin-bottom:10px;box-shadow:0 1px 6px var(--shadow);}
+.ev-row{display:flex;gap:9px;align-items:flex-start;padding:8px 12px;border-bottom:1px solid var(--rim);}
+.ev-row:last-child{border-bottom:none;}
+.ev-row.new{animation:slidein .3s ease;}
+@keyframes slidein{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+.ev-pip{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px;}
+.ev-pip.ok{background:var(--green);}.ev-pip.warn{background:var(--amber);}.ev-pip.danger{background:var(--red);}
+.ev-msg{font-size:11px;color:var(--text);line-height:1.4;word-break:break-word;}
+.ev-time{font-size:8px;color:var(--muted);margin-top:2px;}
+.ev-empty{padding:14px 12px;font-size:11px;color:var(--muted);}
+ 
+/* SYSTEM COMMANDS */
+.ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;}
+.ctrl-btn{display:flex;flex-direction:column;align-items:center;gap:5px;padding:11px 8px;border-radius:12px;border:1px solid var(--rim);background:var(--panel);color:var(--text);cursor:pointer;font-family:var(--mono);font-size:9px;letter-spacing:.07em;text-transform:uppercase;transition:all .15s;user-select:none;box-shadow:0 1px 6px var(--shadow);}
+.ctrl-btn:active{transform:scale(.96);}
+.ctrl-btn .cico{font-size:19px;}.ctrl-btn .ctag{font-size:7px;color:var(--muted);}
+.ctrl-btn.teal:hover{border-color:var(--teal);background:var(--teal-glow);box-shadow:0 0 12px var(--teal-dim);}
+.ctrl-btn.dng:hover{border-color:var(--red);background:var(--red-dim);box-shadow:0 0 12px var(--red-dim);}
+ 
+/* FLASH SLIDER */
+.flash-card{background:var(--panel);border:1px solid var(--rim);border-radius:12px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 6px var(--shadow);}
+.flash-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.flash-title{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;}
+.flash-badge{font-family:var(--head);font-size:13px;color:var(--green);font-weight:bold;letter-spacing:.04em;min-width:36px;text-align:right;transition:color .3s;}
+.flash-badge.dim{color:var(--muted);}
+input[type=range].flash-slider{-webkit-appearance:none;appearance:none;width:100%;height:4px;background:var(--rim2);border-radius:2px;outline:none;cursor:pointer;}
+input[type=range].flash-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green-dim);border:2px solid var(--bg);cursor:pointer;transition:transform .1s;}
+input[type=range].flash-slider::-webkit-slider-thumb:active{transform:scale(1.2);}
+input[type=range].flash-slider::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--green);border:2px solid var(--bg);cursor:pointer;}
+.flash-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:5px;}
+.flash-note{font-size:9px;color:var(--muted);margin-top:8px;line-height:1.4;}
+ 
+footer{text-align:center;font-size:9px;color:var(--muted);letter-spacing:.15em;padding-top:4px;}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(70px);background:var(--panel);border:1px solid var(--rim2);border-radius:20px;padding:7px 18px;font-size:11px;color:var(--teal);transition:transform .28s cubic-bezier(.34,1.56,.64,1);pointer-events:none;z-index:99;white-space:nowrap;box-shadow:0 4px 20px var(--shadow);}
+#toast.show{transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
-<div id="root">
-
-  <!-- TOP BAR -->
-  <div class="topbar">
-    <div>
-      <div class="logo">SENTINEL<sub>/ NODE_1</sub></div>
+<div id="app">
+ 
+<header>
+  <div class="brand">
+    <div class="brand-name">SENTINEL</div>
+    <div class="brand-sub">Home Intelligence System &nbsp;/&nbsp; NODE&#x2009;1</div>
+  </div>
+  <div class="header-right">
+    <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">🌙 DARK</button>
+    <div class="nodes">
+      <div class="node-ind"><div class="ndot" id="d2"></div><div class="nl">N2</div></div>
+      <div class="node-ind"><div class="ndot" id="d3"></div><div class="nl">N3</div></div>
+      <div class="node-ind"><div class="ndot" id="d4"></div><div class="nl">N4</div></div>
     </div>
-    <div class="node-strip">
-      <div class="ndot-wrap"><div class="ndot" id="d2"></div><div class="lbl">N2</div></div>
-      <div class="ndot-wrap"><div class="ndot" id="d3"></div><div class="lbl">N3</div></div>
-      <div class="ndot-wrap"><div class="ndot" id="d4"></div><div class="lbl">N4</div></div>
-    </div>
-    <div class="topbar-right">
-      <div class="time-disp" id="clock">--:--:--</div>
-      <div class="refresh-tag" id="rtag">POLLING…</div>
+    <div class="clock-wrap" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;">
+      <div id="clock">--:--:--</div>
+      <div id="rtag">POLLING…</div>
     </div>
   </div>
-
-  <!-- ALERT PILLS -->
-  <div class="alert-strip">
-    <div class="pill ok" id="pill-sec">
-      <div class="p-ico">🔒</div>
-      <div class="p-lbl">Security</div>
-      <div class="p-val" id="sec-val">CLEAR</div>
-    </div>
-    <div class="pill ok" id="pill-gas">
-      <div class="p-ico">💨</div>
-      <div class="p-lbl">Gas</div>
-      <div class="p-val" id="gas-val">SAFE</div>
-    </div>
-    <div class="pill ok" id="pill-pir">
-      <div class="p-ico">👁</div>
-      <div class="p-lbl">Motion</div>
-      <div class="p-val" id="pir-val">IDLE</div>
-    </div>
-  </div>
-
-  <!-- GAS SENSORS -->
-  <div class="divider">Gas Sensors — NODE_3</div>
-  <div class="gas-grid">
-    <div class="gas-card" id="gc-lpg">
-      <div class="gas-head">
-        <span class="gas-name">LPG</span>
-        <span class="gas-max">V2 · /1000</span>
-      </div>
-      <div class="gas-reading"><span id="vv-lpg">—</span><em>ppm</em></div>
-      <div class="gas-track"><div class="gas-fill" id="gf-lpg" style="width:0"></div></div>
-    </div>
-    <div class="gas-card" id="gc-ch4">
-      <div class="gas-head">
-        <span class="gas-name">CH₄</span>
-        <span class="gas-max">V3 · /1000</span>
-      </div>
-      <div class="gas-reading"><span id="vv-ch4">—</span><em>ppm</em></div>
-      <div class="gas-track"><div class="gas-fill" id="gf-ch4" style="width:0"></div></div>
-    </div>
-    <div class="gas-card" id="gc-smoke">
-      <div class="gas-head">
-        <span class="gas-name">Smoke</span>
-        <span class="gas-max">V4 · /300</span>
-      </div>
-      <div class="gas-reading"><span id="vv-smoke">—</span><em>ppm</em></div>
-      <div class="gas-track"><div class="gas-fill" id="gf-smoke" style="width:0"></div></div>
-    </div>
-    <div class="gas-card" id="gc-h2">
-      <div class="gas-head">
-        <span class="gas-name">H₂</span>
-        <span class="gas-max">V5 · /500</span>
-      </div>
-      <div class="gas-reading"><span id="vv-h2">—</span><em>ppm</em></div>
-      <div class="gas-track"><div class="gas-fill" id="gf-h2" style="width:0"></div></div>
-    </div>
-  </div>
-
-  <!-- LAST VERIFICATION -->
-  <div class="divider">Last Verification — V12</div>
-  <div class="face-card">
-    <div class="face-inner">
-      <div class="face-avatar">🪪</div>
-      <div>
-        <div class="face-name" id="f-name">Waiting…</div>
-        <div class="face-sub"  id="f-conf">No capture yet</div>
-        <div class="face-loc"  id="f-loc"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- EVENT LOG -->
-  <div class="divider">Event Log — V6</div>
-  <div class="event-card" id="ev-log">
-    <div class="ev-row">
-      <div class="ev-dot ok"></div>
-      <div class="ev-body">
-        <div class="ev-msg">Waiting for first packet…</div>
-        <div class="ev-time">—</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- CONTROLS -->
-  <div class="divider">Controls</div>
-  <div class="ctrl-grid">
-    <button class="ctrl-btn blue"  onclick="cmd(11,'Manual Verify')">
-      <div class="ico">📸</div>
-      <div>Manual Verify</div>
-      <div class="pin">V11 · Webhook</div>
-    </button>
-    <button class="ctrl-btn green" onclick="cmd(13,'Door Open')">
-      <div class="ico">🚪</div>
-      <div>Open Main Door</div>
-      <div class="pin">V13 → NODE_2</div>
-    </button>
-    <button class="ctrl-btn amber" onclick="cmd(14,'Vent ON')">
-      <div class="ico">💨</div>
-      <div>Force Vent ON</div>
-      <div class="pin">V14 → NODE_3</div>
-    </button>
-    <button class="ctrl-btn red"   onclick="cmd(15,'Valve Open')">
-      <div class="ico">🔧</div>
-      <div>Open Valve</div>
-      <div class="pin">V15 → NODE_3</div>
-    </button>
-  </div>
-
-  <div class="footer" id="uptime">Uptime: —</div>
+</header>
+ 
+<div class="alert-row">
+  <div class="alert-pill ok" id="pill-sec"><div class="ap-ico">🔒</div><div class="ap-lbl">Security</div><div class="ap-val" id="sec-val">CLEAR</div></div>
+  <div class="alert-pill ok" id="pill-gas"><div class="ap-ico">🔥</div><div class="ap-lbl">Gas/Smoke</div><div class="ap-val" id="gas-val">SAFE</div></div>
+  <div class="alert-pill ok" id="pill-pir"><div class="ap-ico">👁</div><div class="ap-lbl">Motion</div><div class="ap-val" id="pir-val">IDLE</div></div>
 </div>
-
-<div id="toast"></div>
-
-<script>
-/* ── CONFIG ── */
-const POLL_MS   = 2500;
-const GAS_LIMIT = { lpg:1000, ch4:1000, smoke:300, h2:500 };
-
-/* ── HELPERS ── */
-function $(id){ return document.getElementById(id) }
-function fmt_up(s){
-  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;
-  return (h?h+'h ':'')+( m?m+'m ':'')+ss+'s';
-}
-function toast(msg){
-  const el=$('toast'); el.textContent=msg; el.classList.add('show');
-  setTimeout(()=>el.classList.remove('show'), 2200);
-}
-
-/* ── PILL UPDATER ── */
-function setPill(id,val_id,txt,state){
-  /* state: 'ok' | 'warn' | 'danger' */
-  $(id).className = 'pill ' + state;
-  $(val_id).textContent = txt;
-}
-
-/* ── GAS BAR UPDATER ── */
-function setGas(key, val, max){
-  const pct  = Math.min(100, (val/max)*100);
-  const over = val >= max;
-  const col  = over ? 'var(--danger)' : pct > 65 ? 'var(--warn)' : 'var(--ok)';
-  $('vv-'+key).textContent = val.toFixed(0);
-  const fill = $('gf-'+key);
-  fill.style.width      = pct+'%';
-  fill.style.background = col;
-  $('gc-'+key).className = 'gas-card'+(over?' over':'');
-}
-
-/* ── EVENT LOG RENDERER ── */
-let lastEvCount = 0;
-function renderEvents(evs){
-  if(!evs||!evs.length) return;
-  const box = $('ev-log');
-  box.innerHTML = evs.map((e,i)=>{
-    const cls = e.lvl===2?'danger': e.lvl===1?'warn':'ok';
-    const isNew = (i===0 && evs.length > lastEvCount) ? ' new' : '';
-    return `<div class="ev-row${isNew}">
-      <div class="ev-dot ${cls}"></div>
-      <div class="ev-body">
-        <div class="ev-msg">${e.msg}</div>
-        <div class="ev-time">${e.t}</div>
+ 
+<!-- SENSORS: GAS LEFT, SMOKE RIGHT -->
+<div class="sect"><span>Environmental Sensors — NODE_3</span></div>
+<div class="sensor-split">
+ 
+  <div class="sensor-group gas-group" id="sg-gas">
+    <div class="sg-title">⚡ Combustible Gas</div>
+    <div class="gas-row">
+      <div class="gr">
+        <div class="gr-head"><span class="gr-name">LPG</span><span class="gr-max">max 1000</span></div>
+        <div class="gr-val"><span id="vv-lpg">—</span><em>ppm</em></div>
+        <div class="gr-bar"><div class="gr-fill" id="gf-lpg" style="width:0;background:var(--amber)"></div></div>
       </div>
-    </div>`;
-  }).join('');
-  lastEvCount = evs.length;
+      <div class="gr">
+        <div class="gr-head"><span class="gr-name">CH₄ Methane</span><span class="gr-max">max 1000</span></div>
+        <div class="gr-val"><span id="vv-ch4">—</span><em>ppm</em></div>
+        <div class="gr-bar"><div class="gr-fill" id="gf-ch4" style="width:0;background:var(--amber)"></div></div>
+      </div>
+    </div>
+  </div>
+ 
+  <div class="sensor-group smoke-group" id="sg-smoke">
+    <div class="sg-title">🌫 Smoke / H₂</div>
+    <div class="gas-row">
+      <div class="gr">
+        <div class="gr-head"><span class="gr-name">Smoke</span><span class="gr-max">max 300</span></div>
+        <div class="gr-val"><span id="vv-smoke">—</span><em>ppm</em></div>
+        <div class="gr-bar"><div class="gr-fill" id="gf-smoke" style="width:0;background:var(--purple)"></div></div>
+      </div>
+      <div class="gr">
+        <div class="gr-head"><span class="gr-name">H₂ Hydrogen</span><span class="gr-max">max 500</span></div>
+        <div class="gr-val"><span id="vv-h2">—</span><em>ppm</em></div>
+        <div class="gr-bar"><div class="gr-fill" id="gf-h2" style="width:0;background:var(--purple)"></div></div>
+      </div>
+    </div>
+  </div>
+ 
+</div>
+ 
+<!-- REMOTE CONTROLS -->
+<div class="sect"><span>Remote Controls — NODE_2 &amp; NODE_3</span></div>
+<div class="remote-grid">
+  <div class="remote-card">
+    <div class="rc-label"><div class="rc-ico">🚪</div><div class="rc-name">Main Door</div><div class="rc-sub">NODE_2</div></div>
+    <div class="rc-btns">
+      <button class="rc-btn open-btn"  onclick="remoteCtrl(20,'Main Door','OPEN')">OPEN</button>
+      <button class="rc-btn close-btn" onclick="remoteCtrl(21,'Main Door','CLOSED')">CLOSE</button>
+    </div>
+    <div class="rc-state closed" id="rs-main-door">CLOSED</div>
+  </div>
+  <div class="remote-card">
+    <div class="rc-label"><div class="rc-ico">🚪</div><div class="rc-name">Back Door</div><div class="rc-sub">NODE_3</div></div>
+    <div class="rc-btns">
+      <button class="rc-btn open-btn"  onclick="remoteCtrl(22,'Back Door','OPEN')">OPEN</button>
+      <button class="rc-btn close-btn" onclick="remoteCtrl(23,'Back Door','CLOSED')">CLOSE</button>
+    </div>
+    <div class="rc-state closed" id="rs-back-door">CLOSED</div>
+  </div>
+  <div class="remote-card">
+    <div class="rc-label"><div class="rc-ico">🔧</div><div class="rc-name">Gas Valve</div><div class="rc-sub">NODE_3</div></div>
+    <div class="rc-btns">
+      <button class="rc-btn open-btn"  onclick="remoteCtrl(24,'Gas Valve','OPEN')">OPEN</button>
+      <button class="rc-btn close-btn" onclick="remoteCtrl(25,'Gas Valve','CLOSED')">CLOSE</button>
+    </div>
+    <div class="rc-state closed" id="rs-valve">CLOSED</div>
+  </div>
+  <div class="remote-card">
+    <div class="rc-label"><div class="rc-ico">🌀</div><div class="rc-name">Vent Fan</div><div class="rc-sub">NODE_3</div></div>
+    <div class="rc-btns">
+      <button class="rc-btn on-btn"   onclick="remoteCtrl(26,'Vent Fan','ON')">ON</button>
+      <button class="rc-btn off-btn2" onclick="remoteCtrl(27,'Vent Fan','OFF')">OFF</button>
+    </div>
+    <div class="rc-state off" id="rs-vent">OFF</div>
+  </div>
+</div>
+ 
+<!-- APPLIANCES -->
+<div class="sect"><span>Appliances — Voice + Manual Override</span></div>
+<div class="appliance-grid">
+  <div class="app-card" id="ap-kl"><div class="app-top"><div class="app-ico">💡</div><div><div class="app-lbl">Kitchen Light</div><div class="app-state" id="as-kl">OFF</div></div></div><div class="app-override"><button class="ovr-btn on-btn" onclick="override('kl',true)">ON</button><button class="ovr-btn off-btn" onclick="override('kl',false)">OFF</button></div></div>
+  <div class="app-card" id="ap-bl"><div class="app-top"><div class="app-ico">💡</div><div><div class="app-lbl">Bedroom Light</div><div class="app-state" id="as-bl">OFF</div></div></div><div class="app-override"><button class="ovr-btn on-btn" onclick="override('bl',true)">ON</button><button class="ovr-btn off-btn" onclick="override('bl',false)">OFF</button></div></div>
+  <div class="app-card" id="ap-pl"><div class="app-top"><div class="app-ico">💡</div><div><div class="app-lbl">Parlour Light</div><div class="app-state" id="as-pl">OFF</div></div></div><div class="app-override"><button class="ovr-btn on-btn" onclick="override('pl',true)">ON</button><button class="ovr-btn off-btn" onclick="override('pl',false)">OFF</button></div></div>
+  <div class="app-card" id="ap-ol"><div class="app-top"><div class="app-ico">🔦</div><div><div class="app-lbl">Outside Light</div><div class="app-state" id="as-ol">OFF</div></div></div><div class="app-override"><button class="ovr-btn on-btn" onclick="override('ol',true)">ON</button><button class="ovr-btn off-btn" onclick="override('ol',false)">OFF</button></div></div>
+  <div class="app-card" id="ap-ac"><div class="app-top"><div class="app-ico">❄️</div><div><div class="app-lbl">Cooling</div><div class="app-state" id="as-ac">OFF</div></div></div><div class="app-override"><button class="ovr-btn on-btn" onclick="override('ac',true)">ON</button><button class="ovr-btn off-btn" onclick="override('ac',false)">OFF</button></div></div>
+  <div class="app-card" id="ap-bb"><div class="app-top"><div class="app-ico">🪟</div><div><div class="app-lbl">Bedroom Blinds</div><div class="app-state" id="as-bb">CLOSED</div></div></div><div class="app-override"><button class="ovr-btn on-btn" onclick="override('bb',true)">OPEN</button><button class="ovr-btn off-btn" onclick="override('bb',false)">CLOSE</button></div></div>
+  <div class="app-card" id="ap-pb"><div class="app-top"><div class="app-ico">🪟</div><div><div class="app-lbl">Parlour Blinds</div><div class="app-state" id="as-pb">CLOSED</div></div></div><div class="app-override"><button class="ovr-btn on-btn" onclick="override('pb',true)">OPEN</button><button class="ovr-btn off-btn" onclick="override('pb',false)">CLOSE</button></div></div>
+</div>
+ 
+<!-- FACE -->
+<div class="sect"><span>Last Face Verification</span></div>
+<div class="face-card" id="face-card">
+  <div class="face-row">
+    <div class="face-photo" id="face-photo">
+      <img id="face-img" src="" alt="">
+      <span id="face-placeholder">🪪</span>
+    </div>
+    <div class="face-info">
+      <div class="face-name" id="f-name">Awaiting capture…</div>
+      <div class="face-meta" id="f-conf">No verification yet</div>
+      <div class="face-loc"  id="f-loc"></div>
+      <div id="f-badge"></div>
+    </div>
+  </div>
+</div>
+ 
+<!-- EVENT LOG with download button -->
+<div class="sect"><span>Event Log</span></div>
+<div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+  <a class="dl-btn" id="dl-btn" href="/api/events.csv" download="sentinel_events.csv">⬇ Download Log</a>
+</div>
+<div class="ev-card" id="ev-log">
+  <div class="ev-empty">Waiting for first event…</div>
+</div>
+ 
+<!-- SYSTEM COMMANDS -->
+<div class="sect"><span>System Commands</span></div>
+<div class="ctrl-grid">
+  <button class="ctrl-btn teal" onclick="sysCmd(11,'Manual Verify')">
+    <div class="cico">📸</div><div>Manual Verify</div><div class="ctag">→ NODE_4 + Face++</div>
+  </button>
+  <button class="ctrl-btn dng" onclick="sysCmd(15,'LOCKDOWN')">
+    <div class="cico">🔴</div><div>Lockdown</div><div class="ctag">→ All Nodes</div>
+  </button>
+</div>
+ 
+<!-- FLASH BRIGHTNESS SLIDER — NODE_4 camera LED -->
+<div class="sect"><span>Camera Flash — NODE_4</span></div>
+<div class="flash-card">
+  <div class="flash-header">
+    <div class="flash-title"><span>💡</span><span>Flash Brightness</span></div>
+    <div class="flash-badge dim" id="flash-badge">OFF</div>
+  </div>
+  <input type="range" class="flash-slider" id="flash-slider"
+    min="0" max="255" value="0" step="1"
+    oninput="onFlashInput(this.value)"
+    onchange="sendFlash(this.value)">
+  <div class="flash-labels">
+    <span>OFF</span><span>25%</span><span>50%</span><span>75%</span><span>MAX</span>
+  </div>
+  <div class="flash-note">
+    ⚠ Flash auto-off 3 s after face capture. Set brightness before Manual Verify.
+  </div>
+</div>
+ 
+<footer id="uptime">NODE_1 uptime: —</footer>
+</div>
+<div id="toast"></div>
+ 
+<script>
+const POLL_MS=2500;
+const GAS_MAX={lpg:1000,ch4:1000,smoke:300,h2:500};
+const GAS_THRESH={lpg:[600,1000],ch4:[600,1000],smoke:[180,300],h2:[300,500]};
+const OVERRIDE_PINS={kl:[30,31],bl:[32,33],pl:[34,35],ol:[36,37],ac:[38,39],bb:[40,41],pb:[42,43]};
+const appMeta={
+  kl:{card:'ap-kl',stat:'as-kl',off:'OFF',on:'ON'},
+  bl:{card:'ap-bl',stat:'as-bl',off:'OFF',on:'ON'},
+  pl:{card:'ap-pl',stat:'as-pl',off:'OFF',on:'ON'},
+  ol:{card:'ap-ol',stat:'as-ol',off:'OFF',on:'ON'},
+  ac:{card:'ap-ac',stat:'as-ac',off:'OFF',on:'ON'},
+  bb:{card:'ap-bb',stat:'as-bb',off:'CLOSED',on:'OPEN'},
+  pb:{card:'ap-pb',stat:'as-pb',off:'CLOSED',on:'OPEN'},
+};
+ 
+let darkMode=true;
+function toggleTheme(){
+  darkMode=!darkMode;
+  document.documentElement.setAttribute('data-theme',darkMode?'dark':'light');
+  document.getElementById('theme-btn').textContent=darkMode?'🌙 DARK':'☀️ LIGHT';
+  try{localStorage.setItem('sentinel-theme',darkMode?'dark':'light');}catch(e){}
 }
-
-/* ── CLOCK ── */
-setInterval(()=>{
-  $('clock').textContent = new Date().toLocaleTimeString();
-},1000);
-
-/* ── POLL LOOP ── */
+(function(){
+  try{
+    if(localStorage.getItem('sentinel-theme')==='light'){
+      darkMode=false;document.documentElement.setAttribute('data-theme','light');
+      document.addEventListener('DOMContentLoaded',()=>{document.getElementById('theme-btn').textContent='☀️ LIGHT';});
+    }
+  }catch(e){}
+})();
+ 
+const $=id=>document.getElementById(id);
+function fmt_up(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;return(h?h+'h ':'')+(m?m+'m ':'')+ss+'s';}
+function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2400);}
+function setPill(id,valId,txt,state){$(id).className='alert-pill '+state;$(valId).textContent=txt;}
+ 
+function setGasBar(key,val,max,warn,alarm,baseColor){
+  const pct=Math.min(100,(val/max)*100);
+  $('vv-'+key).textContent=val.toFixed(0);
+  const f=$('gf-'+key);
+  f.style.width=pct+'%';
+  f.style.background=(val>=alarm)?'var(--red)':baseColor;
+}
+ 
+function updateSensors(d){
+  const lpg=d.lpg||0,ch4=d.ch4||0,smoke=d.smoke||0,h2=d.h2||0;
+ 
+  setGasBar('lpg',  lpg,  GAS_MAX.lpg,  GAS_THRESH.lpg[0],  GAS_THRESH.lpg[1],  'var(--amber)');
+  setGasBar('ch4',  ch4,  GAS_MAX.ch4,  GAS_THRESH.ch4[0],  GAS_THRESH.ch4[1],  'var(--amber)');
+  setGasBar('smoke',smoke,GAS_MAX.smoke,GAS_THRESH.smoke[0],GAS_THRESH.smoke[1],'var(--purple)');
+  setGasBar('h2',   h2,   GAS_MAX.h2,   GAS_THRESH.h2[0],   GAS_THRESH.h2[1],   'var(--purple)');
+ 
+  const gasAlarm =(lpg>=GAS_THRESH.lpg[1])||(ch4>=GAS_THRESH.ch4[1]);
+  const smokeAlarm=(smoke>=GAS_THRESH.smoke[1])||(h2>=GAS_THRESH.h2[1]);
+  const gasWarn  =(lpg>=GAS_THRESH.lpg[0])||(ch4>=GAS_THRESH.ch4[0]);
+  const smokeWarn=(smoke>=GAS_THRESH.smoke[0])||(h2>=GAS_THRESH.h2[0]);
+ 
+  $('sg-gas').className  ='sensor-group gas-group'  +(gasAlarm  ?' alarm-gas'  :'');
+  $('sg-smoke').className='sensor-group smoke-group'+(smokeAlarm?' alarm-smoke':'');
+ 
+  /* Combined pill */
+  const anyAlarm=gasAlarm||smokeAlarm;
+  const anyWarn =gasWarn ||smokeWarn;
+  /* Show which type is alerting */
+  const gasLabel = anyAlarm
+    ? (gasAlarm&&smokeAlarm?'GAS+SMOKE!':gasAlarm?'GAS!':'SMOKE!')
+    : anyWarn?'WARNING':'SAFE';
+  setPill('pill-gas','gas-val',gasLabel,anyAlarm?'danger':anyWarn?'warn':'ok');
+}
+ 
+function setApp(key,on){
+  const m=appMeta[key];if(!m)return;
+  const c=$(m.card),s=$(m.stat);
+  if(c)c.className='app-card'+(on?' on':'');
+  if(s)s.textContent=on?m.on:m.off;
+}
+ 
+function setRcState(key,on){
+  const ids={'main-door':'rs-main-door','back-door':'rs-back-door','valve':'rs-valve','vent':'rs-vent'};
+  const el=$(ids[key]);if(!el)return;
+  const isVent=(key==='vent');
+  el.textContent=on?(isVent?'ON':'OPEN'):(isVent?'OFF':'CLOSED');
+  el.className='rc-state '+(on?(isVent?'on':'open'):(isVent?'off':'closed'));
+}
+ 
+const evMap={
+  'VOICE: Kitchen Light ON':()=>setApp('kl',true),   'VOICE: Kitchen Light OFF':()=>setApp('kl',false),
+  'VOICE: Bedroom Light ON':()=>setApp('bl',true),   'VOICE: Bedroom Light OFF':()=>setApp('bl',false),
+  'VOICE: Parlour Light ON':()=>setApp('pl',true),   'VOICE: Parlour Light OFF':()=>setApp('pl',false),
+  'VOICE: Outside Light ON':()=>setApp('ol',true),   'VOICE: Outside Light OFF':()=>setApp('ol',false),
+  'VOICE: Cooling ON':()=>setApp('ac',true),         'VOICE: Cooling OFF':()=>setApp('ac',false),
+  'VOICE: Bedroom Blinds OPEN':()=>setApp('bb',true),'VOICE: Bedroom Blinds CLOSE':()=>setApp('bb',false),
+  'VOICE: Parlour Blinds OPEN':()=>setApp('pb',true),'VOICE: Parlour Blinds CLOSE':()=>setApp('pb',false),
+  'OVERRIDE: Kitchen Light ON':()=>setApp('kl',true), 'OVERRIDE: Kitchen Light OFF':()=>setApp('kl',false),
+  'OVERRIDE: Bedroom Light ON':()=>setApp('bl',true), 'OVERRIDE: Bedroom Light OFF':()=>setApp('bl',false),
+  'OVERRIDE: Parlour Light ON':()=>setApp('pl',true), 'OVERRIDE: Parlour Light OFF':()=>setApp('pl',false),
+  'OVERRIDE: Outside Light ON':()=>setApp('ol',true), 'OVERRIDE: Outside Light OFF':()=>setApp('ol',false),
+  'OVERRIDE: Cooling ON':()=>setApp('ac',true),       'OVERRIDE: Cooling OFF':()=>setApp('ac',false),
+  'OVERRIDE: Bedroom Blinds OPEN':()=>setApp('bb',true),'OVERRIDE: Bedroom Blinds CLOSE':()=>setApp('bb',false),
+  'OVERRIDE: Parlour Blinds OPEN':()=>setApp('pb',true),'OVERRIDE: Parlour Blinds CLOSE':()=>setApp('pb',false),
+  'REMOTE: Main Door OPEN':()=>setRcState('main-door',true),  'REMOTE: Main Door CLOSED':()=>setRcState('main-door',false),
+  'REMOTE: Back Door OPEN':()=>setRcState('back-door',true),  'REMOTE: Back Door CLOSED':()=>setRcState('back-door',false),
+  'REMOTE: Gas Valve OPEN':()=>setRcState('valve',true),      'REMOTE: Gas Valve CLOSED':()=>setRcState('valve',false),
+  'REMOTE: Vent ON':()=>setRcState('vent',true),              'REMOTE: Vent OFF':()=>setRcState('vent',false),
+};
+ 
+let lastEvHash='';
+function renderEvents(evs){
+  if(!evs||!evs.length)return;
+  evs.forEach(e=>{const fn=evMap[e.msg];if(fn)fn();});
+  const hash=evs.map(e=>e.t+e.msg).join('|');
+  if(hash===lastEvHash)return;
+  lastEvHash=hash;
+  $('ev-log').innerHTML=evs.map((e,i)=>{
+    const cls=e.lvl===2?'danger':e.lvl===1?'warn':'ok';
+    return`<div class="ev-row${i===0?' new':''}"><div class="ev-pip ${cls}"></div><div class="ev-text"><div class="ev-msg">${e.msg}</div><div class="ev-time">${e.t}</div></div></div>`;
+  }).join('');
+}
+ 
+let lastImgUrl='';
+function renderFace(faceStr,imgUrl){
+  if(faceStr){
+    const[name,conf,loc]=faceStr.split('|');
+    if(name){
+      const granted=name!=='Unknown'&&name!=='API error'&&name!=='Camera error';
+      $('face-card').className='face-card '+(granted?'granted':'denied');
+      $('f-name').textContent=name||'—';
+      $('f-conf').textContent=conf?'Confidence: '+conf:'';
+      $('f-loc').textContent=loc?'@ '+loc:'';
+      $('f-badge').innerHTML=granted
+        ?'<span class="face-badge g">ACCESS GRANTED</span>'
+        :'<span class="face-badge d">ACCESS DENIED</span>';
+    }
+  }
+  if(imgUrl&&imgUrl!==lastImgUrl){
+    lastImgUrl=imgUrl;
+    const img=$('face-img');
+    img.onload=()=>{img.classList.add('loaded');$('face-placeholder').style.display='none';};
+    img.onerror=()=>{img.classList.remove('loaded');$('face-placeholder').style.display='';};
+    img.src=imgUrl;
+  }
+}
+ 
+setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString('en-GB');},1000);
+ 
 function poll(){
-  fetch('/api/status')
+  fetch('/api/status',{cache:'no-store'})
     .then(r=>r.json())
     .then(d=>{
-      /* Node online dots */
       $('d2').className='ndot '+(d.n2?'on':'off');
       $('d3').className='ndot '+(d.n3?'on':'off');
       $('d4').className='ndot '+(d.n4?'on':'off');
-
-      /* Alert pills */
-      setPill('pill-sec','sec-val', d.sec?'ALERT!':'CLEAR',   d.sec?'danger':'ok');
-      setPill('pill-gas','gas-val', d.gas?'DANGER':'SAFE',    d.gas?'danger':'ok');
-      setPill('pill-pir','pir-val', d.pir?'ACTIVE':'IDLE',    d.pir?'warn':'ok');
-
-      /* Gas gauges */
-      setGas('lpg',   d.lpg,   GAS_LIMIT.lpg);
-      setGas('ch4',   d.ch4,   GAS_LIMIT.ch4);
-      setGas('smoke', d.smoke, GAS_LIMIT.smoke);
-      setGas('h2',    d.h2,    GAS_LIMIT.h2);
-
-      /* Face result  —  format: "Name|Conf|Location" */
-      const parts = (d.face||'').split('|');
-      const name  = parts[0]||'';
-      const conf  = parts[1]||'';
-      const loc   = parts[2]||'';
-      if(name && name!=='Unknown'){
-        $('f-name').textContent = name;
-        $('f-name').className   = 'face-name';
-      } else if(name==='Unknown'){
-        $('f-name').textContent = 'UNKNOWN';
-        $('f-name').className   = 'face-name unknown';
-      }
-      if(conf) $('f-conf').textContent = 'Confidence: '+conf;
-      if(loc)  $('f-loc').textContent  = '@ '+loc;
-
-      /* Events */
+      setPill('pill-sec','sec-val',d.sec?'ALERT!':'CLEAR',d.sec?'danger':'ok');
+      setPill('pill-pir','pir-val',d.pir?'ACTIVE':'IDLE',d.pir?'warn':'ok');
+      updateSensors(d);
+      renderFace(d.face,d.img);
       renderEvents(d.events);
-
-      /* Uptime */
-      $('uptime').textContent = 'NODE_1 uptime: '+fmt_up(d.up||0);
-      $('rtag').textContent   = 'LIVE  ●';
+      $('uptime').textContent='NODE_1 uptime: '+fmt_up(d.up||0);
+      $('rtag').textContent='LIVE ●';$('rtag').className='live';
     })
-    .catch(()=>{
-      $('rtag').textContent='NO SIGNAL';
-    });
+    .catch(()=>{$('rtag').textContent='NO SIGNAL';$('rtag').className='';});
 }
-
-/* ── CONTROL COMMAND ── */
-function cmd(pin, label){
-  fetch('/blynk?pin=V'+pin).catch(()=>{});
-  toast('► '+label+' sent (V'+pin+')');
+ 
+function remoteCtrl(pin,label,state){
+  fetch('/blynk?pin=V'+pin,{cache:'no-store'}).catch(()=>{});
+  toast('▶ '+label+' → '+state);
 }
-
+function override(key,on){
+  const pins=OVERRIDE_PINS[key];if(!pins)return;
+  setApp(key,on);
+  fetch('/blynk?pin=V'+(on?pins[0]:pins[1]),{cache:'no-store'}).catch(()=>{});
+  const m=appMeta[key];
+  toast('▶ Override: '+(m?(on?m.on:m.off):(on?'ON':'OFF')));
+}
+function sysCmd(pin,label){
+  fetch('/blynk?pin=V'+pin,{cache:'no-store'}).catch(()=>{});
+  toast('▶ '+label+' sent');
+}
+ 
+/* ── FLASH SLIDER ──
+   oninput  → updates badge live while dragging, no network call
+   onchange → sends value after 300ms debounce when finger lifts
+   Flow: slider → /blynk?pin=V28&val=N → webhook_task case 28
+         → espnow CMD_SET_FLASH(brightness) → NODE_4 LEDC PWM */
+let flashDebounce=null;
+function onFlashInput(val){
+  val=parseInt(val);
+  const pct=Math.round((val/255)*100);
+  const badge=$('flash-badge');
+  badge.textContent=val===0?'OFF':pct+'%';
+  badge.className='flash-badge'+(val===0?' dim':'');
+  const fillPct=(val/255)*100;
+  $('flash-slider').style.background=
+    `linear-gradient(to right,var(--green) ${fillPct}%,var(--rim2) ${fillPct}%)`;
+}
+function sendFlash(val){
+  clearTimeout(flashDebounce);
+  flashDebounce=setTimeout(()=>{
+    val=parseInt(val);
+    fetch('/blynk?pin=V28&val='+val,{cache:'no-store'}).catch(()=>{});
+    toast('💡 Flash → '+(val===0?'OFF':Math.round((val/255)*100)+'%'));
+  },300);
+}
+ 
+/* Initialise slider fill on load */
+window.addEventListener('DOMContentLoaded',()=>onFlashInput(0));
+ 
 poll();
-setInterval(poll, POLL_MS);
+setInterval(poll,POLL_MS);
 </script>
 </body>
 </html>
+ 
