@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS
-        "main.c"
+        "main.cpp"
         "wifi.c"
         "espnow.c"
         "http_client.c"
@@ -28,4 +28,8 @@ idf_component_register(
     esp_driver_ledc      # driver/ledc.h  <-- add this now
     esp-sr               # esp_afe_sr_iface.h, esp_mn_models.h, etc.   # face_verify.c likely needs this
     espressif__esp-dsp    # if using DSP in face_verify
+    edge_impulse
 )
+
+component_compile_options(-Wno-maybe-uninitialized -Wno-missing-field-initializers -Wno-uninitialized)
+
