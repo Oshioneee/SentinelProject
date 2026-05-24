@@ -191,6 +191,12 @@ static bool s_gas_was_danger = false;
 static bool s_pir_was_active = false;
 static SemaphoreHandle_t g_pipeline_mtx = NULL;
 
+/* Binary semaphore: given by handle_node4 when NODE_4's stream-live ack
+ * arrives (command=CMD_START_STREAM, location=LOC_MAIN_DOOR). face_pipeline
+ * waits on this instead of a blind vTaskDelay(2000), eliminating the race
+ * where NODE_1 fetched /capture before NODE_4's HTTP server was ready.    */
+static SemaphoreHandle_t g_node4_stream_sem = NULL;
+
 #define WEBHOOK_QUEUE_DEPTH 8 /* enlarged: supports V20-V43 + flash slider */
 static QueueHandle_t g_webhook_queue = NULL;
 
@@ -276,7 +282,23 @@ static void face_pipeline(int trigger_location) {
            location_name(trigger_location));
 
   espnow_send_cmd(g_node4_mac, CMD_START_STREAM, 0, trigger_location);
-  vTaskDelay(pdMS_TO_TICKS(2000));
+
+  /* FIX: Wait for NODE_4's stream-live ack (command=1, location=2) instead
+   * of a blind 2-second delay. NODE_4 sends this after camera deinit +
+   * reinit + HTTP server start (~250 ms typical). The 5-second timeout
+   * covers slow reinits and gives the 3 JPEG retry attempts below a
+   * running server to connect to.
+   * Note: this only works because run_pipeline() now spawns a dedicated
+   * task, freeing worker_task to drain g_packet_queue and process the ack
+   * via handle_node4 → xSemaphoreGive(g_node4_stream_sem).              */
+  if (g_node4_stream_sem) {
+    xSemaphoreTake(g_node4_stream_sem, pdMS_TO_TICKS(0)); /* flush stale give */
+    if (xSemaphoreTake(g_node4_stream_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
+      ESP_LOGW(TAG, "[PIPELINE] NODE_4 ack timeout — attempting fetch anyway.");
+    }
+  } else {
+    vTaskDelay(pdMS_TO_TICKS(2000)); /* fallback: semaphore not initialised */
+  }
 
   uint8_t *jpeg = NULL;
   size_t jlen = 0;
@@ -390,13 +412,48 @@ static void face_pipeline(int trigger_location) {
   ESP_LOGI(TAG, "=== Pipeline complete ===");
 }
 
-static void run_pipeline(int location) {
+/* pipeline_task_fn / run_pipeline
+ * ─────────────────────────────────────────────────────────────────────────
+ * FIX: Previously run_pipeline() called face_pipeline() directly from
+ * worker_task, blocking it for the full pipeline duration (2s wait +
+ * HTTP fetch + face verify — up to ~10s). During that block, worker_task
+ * could not drain g_packet_queue, so NODE_4's stream-live ack (command=1,
+ * location=2) sat unprocessed. face_pipeline() had no choice but to use a
+ * blind vTaskDelay(2000) and hope the camera was ready.
+ *
+ * Fix: run_pipeline() now spawns a one-shot FreeRTOS task. worker_task
+ * returns immediately and can receive NODE_4's ack. face_pipeline() then
+ * waits on g_node4_stream_sem (given by handle_node4 on ack) with a 5-
+ * second timeout instead of a fixed 2-second delay.
+ * g_pipeline_mtx still prevents concurrent pipelines.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+typedef struct { int location; } pipeline_arg_t;
+
+static void pipeline_task_fn(void *arg) {
+  pipeline_arg_t *p = (pipeline_arg_t *)arg;
+  int loc = p->location;
+  free(p);
   if (xSemaphoreTake(g_pipeline_mtx, pdMS_TO_TICKS(15000)) == pdTRUE) {
-    face_pipeline(location);
+    face_pipeline(loc);
     xSemaphoreGive(g_pipeline_mtx);
   } else {
-    ESP_LOGW(TAG, "Pipeline mutex timeout - trigger at loc=%d skipped.",
-             location);
+    ESP_LOGW(TAG, "Pipeline mutex timeout — trigger at loc=%d skipped.", loc);
+  }
+  vTaskDelete(NULL);
+}
+
+static void run_pipeline(int location) {
+  pipeline_arg_t *p = (pipeline_arg_t *)malloc(sizeof(pipeline_arg_t));
+  if (!p) {
+    ESP_LOGE(TAG, "run_pipeline: OOM for arg struct.");
+    return;
+  }
+  p->location = location;
+  if (xTaskCreatePinnedToCore(pipeline_task_fn, "pipeline", 8192,
+                               p, 3, NULL, 1) != pdPASS) {
+    ESP_LOGE(TAG, "run_pipeline: failed to create task — trigger dropped.");
+    free(p);
   }
 }
 
@@ -505,10 +562,24 @@ static void handle_node3(const espnow_packet_t *pkt) {
 static void handle_node4(const espnow_packet_t *pkt) {
   g_dash.last_n4_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
   blynk_write_str(VPIN_NODE_NAME, (char *)pkt->name);
+
   if (pkt->location == LOC_HEARTBEAT) {
     ESP_LOGD(TAG, "[NODE_4] Heartbeat.");
     return;
   }
+
+  /* Stream-live ack: NODE_4 sends command=CMD_START_STREAM(1),
+   * location=LOC_MAIN_DOOR(2) once its HTTP server is ready.
+   * Signal face_pipeline() to proceed with the /capture fetch.
+   * FIX: previously this packet fell through both if-checks silently,
+   * so face_pipeline had to use a blind 2-second wait instead.          */
+  if (pkt->command == CMD_START_STREAM && pkt->location == LOC_MAIN_DOOR) {
+    ESP_LOGI(TAG, "[NODE_4] Stream live — signalling pipeline to fetch.");
+    if (g_node4_stream_sem)
+      xSemaphoreGive(g_node4_stream_sem);
+    return;
+  }
+
   if (pkt->location == LOC_INTRUDER) {
     ESP_LOGI(TAG, "[NODE_4] Motion at door.");
     blynk_write_str(VPIN_EVENT_LABEL, "Motion at door - verifying...");
@@ -1360,6 +1431,7 @@ extern "C" void app_main(void) {
   init_mic();
 
   g_pipeline_mtx = xSemaphoreCreateMutex();
+  g_node4_stream_sem = xSemaphoreCreateBinary();  /* for NODE_4 stream-live ack */
   g_webhook_queue = xQueueCreate(WEBHOOK_QUEUE_DEPTH, sizeof(int));
   g_dash_mtx = xSemaphoreCreateMutex();
   memset(&g_dash, 0, sizeof(g_dash));

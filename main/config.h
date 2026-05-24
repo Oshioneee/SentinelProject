@@ -29,8 +29,13 @@
 #define FACEPP_SEARCH_URL     "https://api-us.faceplusplus.com/facepp/v3/search"
 #define FACEPP_MIN_CONFIDENCE 75.0f
  
-/* ---- NODE_4 camera (fill in after NODE_4 first boots and prints IP) ---- */
-#define NODE4_IP          "192.168.1.XXX"            /* <- FILL IN */
+/* ---- NODE_4 camera ----
+ * NODE_4 connects to NODE_1's soft-AP (SENTINEL-HUB) and uses the static
+ * IP 192.168.4.100 (set in NODE_4.ino via WiFi.config). NODE_1's AP
+ * gateway is 192.168.4.1 so NODE_1 reaches NODE_4 directly at this address.
+ * Do NOT use a 192.168.1.x address — that is the home router subnet and is
+ * unreachable from the SENTINEL-HUB AP interface.                         */
+#define NODE4_IP          "192.168.4.100"
 #define NODE4_CAPTURE_URL "http://" NODE4_IP "/capture"
  
 /* ---- MAC Addresses (WiFi STA — confirmed from serial output) ----
