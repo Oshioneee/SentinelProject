@@ -45,7 +45,7 @@ static const char *TAG = "ESPNOW";
 QueueHandle_t g_packet_queue = NULL;
 
 /* Real MAC addresses (confirmed from serial output) */
-uint8_t g_node2_mac[6] = { 0xF0, 0x24, 0xF9, 0x0B, 0xAA, 0xD8 }; /* NODE_2 Security    */
+uint8_t g_node2_mac[6] = { 0xEC, 0xE3, 0x34, 0x9A, 0x82, 0x65 }; /* NODE_2 Security    */
 uint8_t g_node3_mac[6] = { 0xF0, 0x24, 0xF9, 0x0C, 0x8D, 0x30 }; /* NODE_3 Environment */
 uint8_t g_node4_mac[6] = { 0x68, 0x25, 0xDD, 0x2D, 0xD7, 0x1C }; /* NODE_4 Vision/CAM  */
 

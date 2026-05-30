@@ -40,13 +40,24 @@
  
 /* ---- MAC Addresses (WiFi STA — confirmed from serial output) ----
  * NODE_1 (this device)  90:70:69:16:9A:FC
- * NODE_2 Security       F0:24:F9:0B:AA:D8
+ * NODE_2 Security       EC:E3:34:9A:82:65
  * NODE_3 Environment    F0:24:F9:0C:8D:30
  * NODE_4 Vision/CAM     68:25:DD:2D:D7:1C
  */
-#define NODE2_MAC  { 0xF0, 0x24, 0xF9, 0x0B, 0xAA, 0xD8 }
+#define NODE2_MAC  { 0xEC, 0xE3, 0x34, 0x9A, 0x82, 0x65 }
 #define NODE3_MAC  { 0xF0, 0x24, 0xF9, 0x0C, 0x8D, 0x30 }
 #define NODE4_MAC  { 0x68, 0x25, 0xDD, 0x2D, 0xD7, 0x1C }
+
+/* ---- Global MAC address arrays (defined in main.cpp) ---- */
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern uint8_t g_node2_mac[6];
+extern uint8_t g_node3_mac[6];
+extern uint8_t g_node4_mac[6];
+#ifdef __cplusplus
+}
+#endif
  
 /* ---- ESP-NOW channel (must match router AND all other nodes) ---- */
 #define ESPNOW_CHANNEL  6
