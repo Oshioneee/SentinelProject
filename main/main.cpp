@@ -48,6 +48,9 @@ extern const uint8_t dashboard_html_end[] asm("_binary_dashboard_html_end");
 
 static const char *TAG = "SENTINEL";
 
+/* g_node2_mac, g_node3_mac, g_node4_mac are defined in espnow.c
+ * and declared extern in config.h. Do not redefine them here. */
+
 /* ================================================================
    VOICE REC / GPIO CONSTANTS
    ================================================================ */
@@ -281,18 +284,19 @@ static void face_pipeline(int trigger_location) {
   ESP_LOGI(TAG, "=== Pipeline start loc=%d (%s) ===", trigger_location,
            location_name(trigger_location));
 
-  espnow_send_cmd(g_node4_mac, CMD_START_STREAM, 0, trigger_location);
-
-  /* FIX: Wait for NODE_4's stream-live ack (command=1, location=2) instead
-   * of a blind 2-second delay. NODE_4 sends this after camera deinit +
-   * reinit + HTTP server start (~250 ms typical). The 5-second timeout
-   * covers slow reinits and gives the 3 JPEG retry attempts below a
-   * running server to connect to.
-   * Note: this only works because run_pipeline() now spawns a dedicated
-   * task, freeing worker_task to drain g_packet_queue and process the ack
-   * via handle_node4 → xSemaphoreGive(g_node4_stream_sem).              */
+  /* Flush any stale ack from a previous pipeline BEFORE sending CMD_START_STREAM.
+   * Previously the flush happened after the send, creating a race on the 2nd+
+   * capture: NODE_4 reinits faster once the camera driver is warm, so its ack
+   * could arrive and be given to the semaphore before the flush take ran.
+   * The flush then consumed the fresh ack, the 5-second wait timed out, and
+   * the fetch attempt hit NODE_4 after its HTTP server had already shut down. */
   if (g_node4_stream_sem) {
     xSemaphoreTake(g_node4_stream_sem, pdMS_TO_TICKS(0)); /* flush stale give */
+  }
+
+  espnow_send_cmd(g_node4_mac, CMD_START_STREAM, 0, trigger_location);
+
+  if (g_node4_stream_sem) {
     if (xSemaphoreTake(g_node4_stream_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
       ESP_LOGW(TAG, "[PIPELINE] NODE_4 ack timeout — attempting fetch anyway.");
     }

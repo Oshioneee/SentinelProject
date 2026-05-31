@@ -129,12 +129,16 @@ header::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;b
 .ovr-btn:active{transform:scale(.95);}
 .ovr-btn.on-btn:hover{border-color:var(--green);color:var(--green);background:var(--green-dim);}
 .ovr-btn.off-btn:hover{border-color:var(--red);color:var(--red);background:var(--red-dim);}
-.app-card.on .ovr-btn.on-btn{border-color:var(--green);color:var(--green);background:var(--green-dim);}
+/* FROM v2: active button state highlights */
+.app-card.on .ovr-btn.on-btn{border-color:var(--green);color:var(--green);background:var(--green-dim);box-shadow:0 0 6px rgba(0,230,118,.25);}
+.app-card:not(.on) .ovr-btn.off-btn{border-color:var(--red);color:var(--red);background:var(--red-dim);box-shadow:0 0 6px rgba(255,23,68,.2);}
  
 /* FACE CARD */
 .face-card{background:var(--panel);border:1px solid var(--rim);border-radius:12px;padding:12px;margin-bottom:10px;position:relative;overflow:hidden;box-shadow:0 1px 6px var(--shadow);transition:background .35s,border-color .35s;}
 .face-row{display:flex;align-items:flex-start;gap:12px;}
-.face-photo{width:64px;height:64px;border-radius:10px;flex-shrink:0;border:1px solid var(--rim2);background:var(--surface);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px;transition:border-color .3s;}
+/* FROM v1: face photo is interactive (cursor + hover opacity) */
+.face-photo{width:64px;height:64px;border-radius:10px;flex-shrink:0;border:1px solid var(--rim2);background:var(--surface);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px;transition:border-color .3s;cursor:pointer;}
+.face-photo:hover{opacity:.85;}
 .face-photo img{width:100%;height:100%;object-fit:cover;display:none;}
 .face-photo img.loaded{display:block;}
 .face-card.granted .face-photo{border-color:rgba(0,230,118,.5);}
@@ -148,6 +152,17 @@ header::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;b
 .face-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:bold;letter-spacing:.1em;margin-top:5px;}
 .face-badge.g{background:rgba(0,230,118,.15);color:var(--green);border:1px solid rgba(0,230,118,.3);}
 .face-badge.d{background:rgba(255,23,68,.15);color:var(--red);border:1px solid rgba(255,23,68,.3);}
+/* FROM v1: zoom hint overlay on face photo */
+.face-zoom-hint{position:absolute;bottom:3px;right:3px;font-size:9px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:1px 4px;pointer-events:none;opacity:0;transition:opacity .2s;}
+.face-photo:hover .face-zoom-hint{opacity:1;}
+ 
+/* FROM v1: LIGHTBOX */
+#lightbox{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .25s;}
+#lightbox.open{opacity:1;pointer-events:all;}
+#lightbox img{max-width:92vw;max-height:88vh;border-radius:10px;box-shadow:0 0 40px rgba(0,0,0,.8);transform:scale(.88);transition:transform .25s cubic-bezier(.34,1.56,.64,1);}
+#lightbox.open img{transform:scale(1);}
+#lb-close{position:absolute;top:16px;right:18px;font-size:22px;color:#fff;cursor:pointer;opacity:.7;line-height:1;user-select:none;}
+#lb-close:hover{opacity:1;}
  
 /* EVENT LOG */
 .ev-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 0;margin-bottom:-2px;}
@@ -310,9 +325,11 @@ footer{text-align:center;font-size:9px;color:var(--muted);letter-spacing:.15em;p
 <div class="sect"><span>Last Face Verification</span></div>
 <div class="face-card" id="face-card">
   <div class="face-row">
-    <div class="face-photo" id="face-photo">
+    <!-- FROM v1: onclick opens lightbox, zoom hint span present -->
+    <div class="face-photo" id="face-photo" onclick="openLightbox()">
       <img id="face-img" src="" alt="">
       <span id="face-placeholder">🪪</span>
+      <span class="face-zoom-hint">⛶</span>
     </div>
     <div class="face-info">
       <div class="face-name" id="f-name">Awaiting capture…</div>
@@ -363,7 +380,14 @@ footer{text-align:center;font-size:9px;color:var(--muted);letter-spacing:.15em;p
 </div>
  
 <footer id="uptime">NODE_1 uptime: —</footer>
+</div><!-- /#app -->
+
+<!-- FROM v1: LIGHTBOX -->
+<div id="lightbox" onclick="closeLightbox()">
+  <span id="lb-close">✕</span>
+  <img id="lb-img" src="" alt="">
 </div>
+
 <div id="toast"></div>
  
 <script>
@@ -412,24 +436,18 @@ function setGasBar(key,val,max,warn,alarm,baseColor){
  
 function updateSensors(d){
   const lpg=d.lpg||0,ch4=d.ch4||0,smoke=d.smoke||0,h2=d.h2||0;
- 
   setGasBar('lpg',  lpg,  GAS_MAX.lpg,  GAS_THRESH.lpg[0],  GAS_THRESH.lpg[1],  'var(--amber)');
   setGasBar('ch4',  ch4,  GAS_MAX.ch4,  GAS_THRESH.ch4[0],  GAS_THRESH.ch4[1],  'var(--amber)');
   setGasBar('smoke',smoke,GAS_MAX.smoke,GAS_THRESH.smoke[0],GAS_THRESH.smoke[1],'var(--purple)');
   setGasBar('h2',   h2,   GAS_MAX.h2,   GAS_THRESH.h2[0],   GAS_THRESH.h2[1],   'var(--purple)');
- 
   const gasAlarm =(lpg>=GAS_THRESH.lpg[1])||(ch4>=GAS_THRESH.ch4[1]);
   const smokeAlarm=(smoke>=GAS_THRESH.smoke[1])||(h2>=GAS_THRESH.h2[1]);
   const gasWarn  =(lpg>=GAS_THRESH.lpg[0])||(ch4>=GAS_THRESH.ch4[0]);
   const smokeWarn=(smoke>=GAS_THRESH.smoke[0])||(h2>=GAS_THRESH.h2[0]);
- 
   $('sg-gas').className  ='sensor-group gas-group'  +(gasAlarm  ?' alarm-gas'  :'');
   $('sg-smoke').className='sensor-group smoke-group'+(smokeAlarm?' alarm-smoke':'');
- 
-  /* Combined pill */
   const anyAlarm=gasAlarm||smokeAlarm;
   const anyWarn =gasWarn ||smokeWarn;
-  /* Show which type is alerting */
   const gasLabel = anyAlarm
     ? (gasAlarm&&smokeAlarm?'GAS+SMOKE!':gasAlarm?'GAS!':'SMOKE!')
     : anyWarn?'WARNING':'SAFE';
@@ -473,12 +491,13 @@ const evMap={
 };
  
 let lastEvHash='';
+/* FROM v2: hash check BEFORE state replay — avoids redundant DOM updates on every poll */
 function renderEvents(evs){
   if(!evs||!evs.length)return;
-  evs.forEach(e=>{const fn=evMap[e.msg];if(fn)fn();});
   const hash=evs.map(e=>e.t+e.msg).join('|');
   if(hash===lastEvHash)return;
   lastEvHash=hash;
+  evs.forEach(e=>{const fn=evMap[e.msg];if(fn)fn();});
   $('ev-log').innerHTML=evs.map((e,i)=>{
     const cls=e.lvl===2?'danger':e.lvl===1?'warn':'ok';
     return`<div class="ev-row${i===0?' new':''}"><div class="ev-pip ${cls}"></div><div class="ev-text"><div class="ev-msg">${e.msg}</div><div class="ev-time">${e.t}</div></div></div>`;
@@ -500,12 +519,24 @@ function renderFace(faceStr,imgUrl){
         :'<span class="face-badge d">ACCESS DENIED</span>';
     }
   }
-  if(imgUrl&&imgUrl!==lastImgUrl){
+  if(imgUrl){
+    /* FIX: always append ?t=<timestamp> so the browser never serves a cached
+     * frame. Previously the imgUrl!==lastImgUrl guard caused the image to
+     * freeze after the first capture because NODE_1 always sends the same
+     * /capture URL — the check passed only once and the img tag never updated.
+     * We still track lastImgUrl to avoid replaying the loaded animation when
+     * nothing has changed. */
+    const isNew=imgUrl!==lastImgUrl;
     lastImgUrl=imgUrl;
     const img=$('face-img');
+    const bust=imgUrl+(imgUrl.includes('?')?'&':'?')+'t='+Date.now();
+    if(isNew){
+      img.classList.remove('loaded');
+      $('face-placeholder').style.display='';
+    }
     img.onload=()=>{img.classList.add('loaded');$('face-placeholder').style.display='none';};
     img.onerror=()=>{img.classList.remove('loaded');$('face-placeholder').style.display='';};
-    img.src=imgUrl;
+    img.src=bust;
   }
 }
  
@@ -545,11 +576,6 @@ function sysCmd(pin,label){
   toast('▶ '+label+' sent');
 }
  
-/* ── FLASH SLIDER ──
-   oninput  → updates badge live while dragging, no network call
-   onchange → sends value after 300ms debounce when finger lifts
-   Flow: slider → /blynk?pin=V28&val=N → webhook_task case 28
-         → espnow CMD_SET_FLASH(brightness) → NODE_4 LEDC PWM */
 let flashDebounce=null;
 function onFlashInput(val){
   val=parseInt(val);
@@ -570,12 +596,22 @@ function sendFlash(val){
   },300);
 }
  
-/* Initialise slider fill on load */
 window.addEventListener('DOMContentLoaded',()=>onFlashInput(0));
  
 poll();
 setInterval(poll,POLL_MS);
+
+/* FROM v1: LIGHTBOX functions */
+function openLightbox(){
+  const src=$('face-img').src;
+  if(!src||!$('face-img').classList.contains('loaded'))return;
+  $('lb-img').src=src;
+  $('lightbox').classList.add('open');
+}
+function closeLightbox(){
+  $('lightbox').classList.remove('open');
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeLightbox();});
 </script>
 </body>
 </html>
- 

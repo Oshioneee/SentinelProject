@@ -15,7 +15,7 @@ esp_err_t espnow_init(void);
 extern QueueHandle_t g_packet_queue;
 
 /* Peer MAC addresses, filled by espnow_init(), used in main.c */
-extern uint8_t g_node2_mac[6];  /* NODE_2 Security       F0:24:F9:0B:AA:D8 */
+extern uint8_t g_node2_mac[6];  /* NODE_2 Security       F0:24:F9:0B:A9:04 */
 extern uint8_t g_node3_mac[6];  /* NODE_3 Environment    F0:24:F9:0C:8D:30 */
 extern uint8_t g_node4_mac[6];  /* NODE_4 Vision/CAM     68:25:DD:2D:D7:1C */
 
