@@ -1,24 +1,64 @@
-# We need to collect all C/C++ files
-file(GLOB_RECURSE SOURCES "*.cpp" "*.c" "*.cc")
+cmake_minimum_required(VERSION 3.16)
 
-# Filter out unneeded ports
-list(FILTER SOURCES EXCLUDE REGEX "edge-impulse-sdk/porting/.*")
-# Re-add espressif port
-list(APPEND SOURCES "edge-impulse-sdk/porting/espressif/ei_classifier_porting.cpp")
+set(EI_SDK_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}/edge-impulse-sdk")
 
-# Exclude some unneeded hardware specific files
-list(FILTER SOURCES EXCLUDE REGEX "edge-impulse-sdk/classifier/ei_run_camera.cpp")
+# ESP-IDF early expansion phase — declare REQUIRES here so include paths are wired up
+if(CMAKE_BUILD_EARLY_EXPANSION)
+    idf_component_register(REQUIRES esp_timer freertos log heap)
+    return()
+endif()
+
+include(${EI_SDK_FOLDER}/cmake/utils.cmake)
+
+RECURSIVE_FIND_FILE_EXCLUDE_DIR(CPP_SOURCES "${EI_SDK_FOLDER}" "CMSIS" "*.cpp")
+RECURSIVE_FIND_FILE_EXCLUDE_DIR(CC_SOURCES  "${EI_SDK_FOLDER}" "CMSIS" "*.cc")
+RECURSIVE_FIND_FILE_EXCLUDE_DIR(C_SOURCES   "${EI_SDK_FOLDER}" "CMSIS" "*.c")
+
+RECURSIVE_FIND_FILE_APPEND(ASM_SOURCES "${EI_SDK_FOLDER}/porting/espressif/ESP-NN"              "*.s")
+RECURSIVE_FIND_FILE_APPEND(ASM_SOURCES "${EI_SDK_FOLDER}/porting/espressif/ESP-NN"              "*.S")
+RECURSIVE_FIND_FILE_APPEND(ASM_SOURCES "${EI_SDK_FOLDER}/porting/espressif/esp-dsp/modules/fft" "*.s")
+RECURSIVE_FIND_FILE_APPEND(ASM_SOURCES "${EI_SDK_FOLDER}/porting/espressif/esp-dsp/modules/fft" "*.S")
+
+list(APPEND C_SOURCES "${EI_SDK_FOLDER}/CMSIS/DSP/Source/StatisticsFunctions/arm_rms_f32.c")
+
+RECURSIVE_FIND_FILE_APPEND(MODEL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/tflite-model" "*.cpp")
 
 idf_component_register(
-    SRCS "${SOURCES}"
-    INCLUDE_DIRS "." "edge-impulse-sdk" "model-parameters" "tflite-model"
-    REQUIRES esp_timer
+    SRCS
+        ${CPP_SOURCES}
+        ${CC_SOURCES}
+        ${C_SOURCES}
+        ${ASM_SOURCES}
+        ${MODEL_SOURCES}
+    INCLUDE_DIRS
+        "."
+        "tflite-model"
+        "${EI_SDK_FOLDER}"
+        "${EI_SDK_FOLDER}/porting"
+        "${EI_SDK_FOLDER}/porting/espressif/esp-dsp/modules/common/include"
+        "${EI_SDK_FOLDER}/porting/espressif/esp-dsp/modules/fft/include"
+        "${EI_SDK_FOLDER}/porting/espressif/ESP-NN"
+        "${EI_SDK_FOLDER}/porting/espressif/ESP-NN/include"
+    REQUIRES
+        esp_timer
+        freertos
+        log
+        heap
 )
 
-# Set compile options needed by Edge Impulse
-target_compile_options(${COMPONENT_LIB} PRIVATE -O3 -w)
-target_compile_definitions(${COMPONENT_LIB} PUBLIC
-    -DEI_PORTING_ESPRESSIF=1
-    -DEI_CLASSIFIER_TFLITE_ENABLE_ESP_NN=0
-)
+target_compile_definitions(${COMPONENT_TARGET} PUBLIC asm=__asm__)
 
+# Suppress warnings caused by Edge Impulse SDK's older TFLite sources
+# being incompatible with the newer TfLiteRegistration struct in IDF v6.0
+target_compile_options(${COMPONENT_TARGET} PRIVATE
+    -Wno-error=missing-field-initializers
+    -Wno-missing-field-initializers
+    -Wno-error=deprecated-declarations
+    -Wno-error=maybe-uninitialized
+    -Wno-maybe-uninitialized
+    -Wno-error=unused-variable
+    -Wno-error=unused-function
+    -Wno-error=sign-compare
+    -Wno-error=type-limits
+    -Wno-error=narrowing
+)

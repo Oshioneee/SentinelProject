@@ -1,3 +1,11 @@
+import sys
+import io
+# Fix for Windows cp1252 encoding — forces UTF-8 output so box-drawing chars work
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import argparse
 import io
 import math
@@ -199,7 +207,7 @@ if __name__ == '__main__':
     # ESP-SR Model Report
     print(u'')
     print(u'ESP-SR Models Report')
-    print(u'─' * 40)
+    print(u'-' * 40)
     if extra_model_path:
         if os.path.exists(extra_model_path):
             print(u'  Models loaded from external path: {}'.format(extra_model_path))
@@ -222,5 +230,5 @@ if __name__ == '__main__':
     else:
         print(u'  No speech models loaded.')
 
-    print(u'─' * 40)
+    print(u'-' * 40)
     print(u'')

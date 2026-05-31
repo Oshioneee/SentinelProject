@@ -6,6 +6,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -101,47 +102,57 @@ static int get_audio_data(size_t offset, size_t length, float *out_ptr) {
 
 static void ei_task(void *pvParameters) {
   ESP_LOGI(TAG, "Edge Impulse continuous classifier task active.");
-  
+
+  for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+    ESP_LOGI(TAG, "[EI] Label[%d] = %s", i,
+             ei_classifier_inferencing_categories[i]);
+  }
+
   while (1) {
-    vTaskDelay(pdMS_TO_TICKS(250)); // Run classifier 4 times per second (750ms overlap)
-    
+    vTaskDelay(pdMS_TO_TICKS(100)); // Yield briefly between classifications
+
     if (!g_ei_audio_mutex)
       continue;
-      
+
     if (xSemaphoreTake(g_ei_audio_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
       int head = ei_ring_buf_head;
       int first_part = EI_SAMPLE_COUNT - head;
-      memcpy(local_inference_buf, &ei_audio_ring_buf[head], first_part * sizeof(int16_t));
+      memcpy(local_inference_buf, &ei_audio_ring_buf[head],
+             first_part * sizeof(int16_t));
       if (head > 0) {
-        memcpy(&local_inference_buf[first_part], ei_audio_ring_buf, head * sizeof(int16_t));
+        memcpy(&local_inference_buf[first_part], ei_audio_ring_buf,
+               head * sizeof(int16_t));
       }
       xSemaphoreGive(g_ei_audio_mutex);
     } else {
-      continue; // Skip classification if buffer is locked (ensures no real-time drops)
+      continue; // Skip classification if buffer is locked (ensures no real-time
+                // drops)
     }
-    
+
     signal_t signal;
     signal.total_length = EI_SAMPLE_COUNT;
     signal.get_data = &get_audio_data;
-    
+
     ei_impulse_result_t result = {0};
     EI_IMPULSE_ERROR r = run_classifier(&signal, &result, false);
     if (r != EI_IMPULSE_OK) {
       ESP_LOGE(TAG, "run_classifier failed: %d", r);
       continue;
     }
-    
+
     float sentinel_val = result.classification[1].value;
     float noise_val = result.classification[0].value;
     float unknown_val = result.classification[2].value;
-    
-    if (sentinel_val >= 0.15f) {
-      ESP_LOGI(TAG, "[EI Classifier] sentinel: %.2f  noise: %.2f  unknown: %.2f", 
+
+    if (sentinel_val >= 0.05f) {
+      ESP_LOGI(TAG,
+               "[EI Classifier] sentinel: %.2f  noise: %.2f  unknown: %.2f",
                (double)sentinel_val, (double)noise_val, (double)unknown_val);
     }
-    
-    if (sentinel_val >= 0.35f && !g_ei_listening) {
-      ESP_LOGW(TAG, ">>> EI WAKE WORD DETECTED (score: %.2f)!", (double)sentinel_val);
+
+    if (sentinel_val >= 0.25f && !g_ei_listening) {
+      ESP_LOGW(TAG, ">>> EI WAKE WORD DETECTED (score: %.2f)!",
+               (double)sentinel_val);
       g_ei_wakeup_triggered = true;
     }
   }
@@ -180,10 +191,16 @@ static bool s_gas_was_danger = false;
 static bool s_pir_was_active = false;
 static SemaphoreHandle_t g_pipeline_mtx = NULL;
 
-#define WEBHOOK_QUEUE_DEPTH 8   /* enlarged: supports V20-V43 + flash slider */
+/* Binary semaphore: given by handle_node4 when NODE_4's stream-live ack
+ * arrives (command=CMD_START_STREAM, location=LOC_MAIN_DOOR). face_pipeline
+ * waits on this instead of a blind vTaskDelay(2000), eliminating the race
+ * where NODE_1 fetched /capture before NODE_4's HTTP server was ready.    */
+static SemaphoreHandle_t g_node4_stream_sem = NULL;
+
+#define WEBHOOK_QUEUE_DEPTH 8 /* enlarged: supports V20-V43 + flash slider */
 static QueueHandle_t g_webhook_queue = NULL;
 
-#define DASH_EVENTS 20           /* enlarged: keep last 20 events */
+#define DASH_EVENTS 20 /* enlarged: keep last 20 events */
 #define NODE_TIMEOUT_MS 15000
 
 typedef struct {
@@ -198,7 +215,7 @@ static struct {
   int sec_alert;
   int pir;
   char face[80];
-  char last_img_url[256];   /* ImgBB URL of last captured face photo */
+  char last_img_url[256]; /* ImgBB URL of last captured face photo */
   uint32_t last_n2_ms;
   uint32_t last_n3_ms;
   uint32_t last_n4_ms;
@@ -216,9 +233,9 @@ static SemaphoreHandle_t g_dash_mtx = NULL;
    64 KB is enough for a VGA JPEG from the ESP32-CAM.
    Uses PSRAM when available; falls back to DRAM.
    ================================================================ */
-#define SNAP_MAX_BYTES  65536
-static uint8_t          *g_snap_buf = NULL;
-static size_t            g_snap_len = 0;
+#define SNAP_MAX_BYTES 65536
+static uint8_t *g_snap_buf = NULL;
+static size_t g_snap_len = 0;
 static SemaphoreHandle_t g_snap_mtx = NULL;
 
 /* ================================================================
@@ -248,7 +265,7 @@ static void dash_push_event(int lvl, const char *msg) {
   snprintf(e->t, sizeof(e->t), "%02lu:%02lu", (unsigned long)hh,
            (unsigned long)mm);
   e->lvl = lvl;
-  strncpy(e->msg, msg ? msg : "", sizeof(e->msg) - 1);
+  snprintf(e->msg, sizeof(e->msg), "%s", msg ? msg : "");
 
   g_dash.ev_head = (g_dash.ev_head + 1) % DASH_EVENTS;
   if (g_dash.ev_count < DASH_EVENTS)
@@ -265,7 +282,23 @@ static void face_pipeline(int trigger_location) {
            location_name(trigger_location));
 
   espnow_send_cmd(g_node4_mac, CMD_START_STREAM, 0, trigger_location);
-  vTaskDelay(pdMS_TO_TICKS(2000));
+
+  /* FIX: Wait for NODE_4's stream-live ack (command=1, location=2) instead
+   * of a blind 2-second delay. NODE_4 sends this after camera deinit +
+   * reinit + HTTP server start (~250 ms typical). The 5-second timeout
+   * covers slow reinits and gives the 3 JPEG retry attempts below a
+   * running server to connect to.
+   * Note: this only works because run_pipeline() now spawns a dedicated
+   * task, freeing worker_task to drain g_packet_queue and process the ack
+   * via handle_node4 → xSemaphoreGive(g_node4_stream_sem).              */
+  if (g_node4_stream_sem) {
+    xSemaphoreTake(g_node4_stream_sem, pdMS_TO_TICKS(0)); /* flush stale give */
+    if (xSemaphoreTake(g_node4_stream_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
+      ESP_LOGW(TAG, "[PIPELINE] NODE_4 ack timeout — attempting fetch anyway.");
+    }
+  } else {
+    vTaskDelay(pdMS_TO_TICKS(2000)); /* fallback: semaphore not initialised */
+  }
 
   uint8_t *jpeg = NULL;
   size_t jlen = 0;
@@ -294,16 +327,16 @@ static void face_pipeline(int trigger_location) {
       g_snap_len = jlen;
       ESP_LOGI(TAG, "Snapshot stored locally (%u bytes).", (unsigned)jlen);
     } else {
-      ESP_LOGW(TAG, "JPEG too large for snapshot buffer (%u > %d).", (unsigned)jlen, SNAP_MAX_BYTES);
+      ESP_LOGW(TAG, "JPEG too large for snapshot buffer (%u > %d).",
+               (unsigned)jlen, SNAP_MAX_BYTES);
     }
     xSemaphoreGive(g_snap_mtx);
   }
 
   /* Point dashboard at local snapshot immediately ΓÇö works offline */
   if (xSemaphoreTake(g_dash_mtx, pdMS_TO_TICKS(50)) == pdTRUE) {
-    strncpy(g_dash.last_img_url,
-            "http://192.168.4.1:8080/snapshot.jpg",
-            sizeof(g_dash.last_img_url) - 1);
+    snprintf(g_dash.last_img_url, sizeof(g_dash.last_img_url), "%s",
+             "http://192.168.4.1:8080/snapshot.jpg");
     xSemaphoreGive(g_dash_mtx);
   }
 
@@ -317,7 +350,7 @@ static void face_pipeline(int trigger_location) {
     ESP_LOGI(TAG, "ImgBB upload OK ΓåÆ %s", img_url);
     /* Upgrade dashboard URL to public ImgBB link */
     if (xSemaphoreTake(g_dash_mtx, pdMS_TO_TICKS(50)) == pdTRUE) {
-      strncpy(g_dash.last_img_url, img_url, sizeof(g_dash.last_img_url) - 1);
+      snprintf(g_dash.last_img_url, sizeof(g_dash.last_img_url), "%s", img_url);
       xSemaphoreGive(g_dash_mtx);
     }
   } else {
@@ -379,13 +412,48 @@ static void face_pipeline(int trigger_location) {
   ESP_LOGI(TAG, "=== Pipeline complete ===");
 }
 
-static void run_pipeline(int location) {
+/* pipeline_task_fn / run_pipeline
+ * ─────────────────────────────────────────────────────────────────────────
+ * FIX: Previously run_pipeline() called face_pipeline() directly from
+ * worker_task, blocking it for the full pipeline duration (2s wait +
+ * HTTP fetch + face verify — up to ~10s). During that block, worker_task
+ * could not drain g_packet_queue, so NODE_4's stream-live ack (command=1,
+ * location=2) sat unprocessed. face_pipeline() had no choice but to use a
+ * blind vTaskDelay(2000) and hope the camera was ready.
+ *
+ * Fix: run_pipeline() now spawns a one-shot FreeRTOS task. worker_task
+ * returns immediately and can receive NODE_4's ack. face_pipeline() then
+ * waits on g_node4_stream_sem (given by handle_node4 on ack) with a 5-
+ * second timeout instead of a fixed 2-second delay.
+ * g_pipeline_mtx still prevents concurrent pipelines.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+typedef struct { int location; } pipeline_arg_t;
+
+static void pipeline_task_fn(void *arg) {
+  pipeline_arg_t *p = (pipeline_arg_t *)arg;
+  int loc = p->location;
+  free(p);
   if (xSemaphoreTake(g_pipeline_mtx, pdMS_TO_TICKS(15000)) == pdTRUE) {
-    face_pipeline(location);
+    face_pipeline(loc);
     xSemaphoreGive(g_pipeline_mtx);
   } else {
-    ESP_LOGW(TAG, "Pipeline mutex timeout - trigger at loc=%d skipped.",
-             location);
+    ESP_LOGW(TAG, "Pipeline mutex timeout — trigger at loc=%d skipped.", loc);
+  }
+  vTaskDelete(NULL);
+}
+
+static void run_pipeline(int location) {
+  pipeline_arg_t *p = (pipeline_arg_t *)malloc(sizeof(pipeline_arg_t));
+  if (!p) {
+    ESP_LOGE(TAG, "run_pipeline: OOM for arg struct.");
+    return;
+  }
+  p->location = location;
+  if (xTaskCreatePinnedToCore(pipeline_task_fn, "pipeline", 8192,
+                               p, 3, NULL, 1) != pdPASS) {
+    ESP_LOGE(TAG, "run_pipeline: failed to create task — trigger dropped.");
+    free(p);
   }
 }
 
@@ -494,10 +562,24 @@ static void handle_node3(const espnow_packet_t *pkt) {
 static void handle_node4(const espnow_packet_t *pkt) {
   g_dash.last_n4_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
   blynk_write_str(VPIN_NODE_NAME, (char *)pkt->name);
+
   if (pkt->location == LOC_HEARTBEAT) {
     ESP_LOGD(TAG, "[NODE_4] Heartbeat.");
     return;
   }
+
+  /* Stream-live ack: NODE_4 sends command=CMD_START_STREAM(1),
+   * location=LOC_MAIN_DOOR(2) once its HTTP server is ready.
+   * Signal face_pipeline() to proceed with the /capture fetch.
+   * FIX: previously this packet fell through both if-checks silently,
+   * so face_pipeline had to use a blind 2-second wait instead.          */
+  if (pkt->command == CMD_START_STREAM && pkt->location == LOC_MAIN_DOOR) {
+    ESP_LOGI(TAG, "[NODE_4] Stream live — signalling pipeline to fetch.");
+    if (g_node4_stream_sem)
+      xSemaphoreGive(g_node4_stream_sem);
+    return;
+  }
+
   if (pkt->location == LOC_INTRUDER) {
     ESP_LOGI(TAG, "[NODE_4] Motion at door.");
     blynk_write_str(VPIN_EVENT_LABEL, "Motion at door - verifying...");
@@ -536,9 +618,15 @@ static esp_err_t status_handler(httpd_req_t *req) {
 
   uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
-  int n2 = (g_dash.last_n2_ms && (now_ms - g_dash.last_n2_ms) < NODE_TIMEOUT_MS) ? 1 : 0;
-  int n3 = (g_dash.last_n3_ms && (now_ms - g_dash.last_n3_ms) < NODE_TIMEOUT_MS) ? 1 : 0;
-  int n4 = (g_dash.last_n4_ms && (now_ms - g_dash.last_n4_ms) < NODE_TIMEOUT_MS) ? 1 : 0;
+  int n2 = (g_dash.last_n2_ms && (now_ms - g_dash.last_n2_ms) < NODE_TIMEOUT_MS)
+               ? 1
+               : 0;
+  int n3 = (g_dash.last_n3_ms && (now_ms - g_dash.last_n3_ms) < NODE_TIMEOUT_MS)
+               ? 1
+               : 0;
+  int n4 = (g_dash.last_n4_ms && (now_ms - g_dash.last_n4_ms) < NODE_TIMEOUT_MS)
+               ? 1
+               : 0;
 
   /* Heap-allocate large buffers ΓÇö ev_buf(2048) + buf(3072) + other locals
    * totalled ~6 KB on the stack, overflowing the httpd task stack (4-8 KB
@@ -550,7 +638,8 @@ static esp_err_t status_handler(httpd_req_t *req) {
     httpd_resp_sendstr(req, "{\"error\":\"oom\"}");
     return ESP_OK;
   }
-  ev_buf[0] = '['; ev_buf[1] = '\0';
+  ev_buf[0] = '[';
+  ev_buf[1] = '\0';
 
   int count = g_dash.ev_count < DASH_EVENTS ? g_dash.ev_count : DASH_EVENTS;
   for (int i = 0; i < count; i++) {
@@ -560,7 +649,8 @@ static esp_err_t status_handler(httpd_req_t *req) {
     char safe[112] = {0};
     int si = 0;
     for (int k = 0; e->msg[k] && si < (int)sizeof(safe) - 2; k++) {
-      if (e->msg[k] == '"' || e->msg[k] == '\\') safe[si++] = '\\';
+      if (e->msg[k] == '"' || e->msg[k] == '\\')
+        safe[si++] = '\\';
       safe[si++] = e->msg[k];
     }
 
@@ -572,10 +662,13 @@ static esp_err_t status_handler(httpd_req_t *req) {
   strcat(ev_buf, "]");
 
   uint32_t uptime_s = now_ms / 1000;
-  float lpg = g_dash.lpg, ch4 = g_dash.ch4, smoke = g_dash.smoke, h2 = g_dash.h2;
+  float lpg = g_dash.lpg, ch4 = g_dash.ch4, smoke = g_dash.smoke,
+        h2 = g_dash.h2;
   int gas = g_dash.gas_alert, sec = g_dash.sec_alert, pir = g_dash.pir;
-  char face[80]; strncpy(face, g_dash.face, sizeof(face) - 1);
-  char img_url[256]; strncpy(img_url, g_dash.last_img_url, sizeof(img_url) - 1);
+  char face[80];
+  snprintf(face, sizeof(face), "%s", g_dash.face);
+  char img_url[256];
+  snprintf(img_url, sizeof(img_url), "%s", g_dash.last_img_url);
 
   xSemaphoreGive(g_dash_mtx);
 
@@ -583,7 +676,8 @@ static esp_err_t status_handler(httpd_req_t *req) {
   char safe_url[300] = {0};
   int ui = 0;
   for (int k = 0; img_url[k] && ui < (int)sizeof(safe_url) - 2; k++) {
-    if (img_url[k] == '"') safe_url[ui++] = '\\';
+    if (img_url[k] == '"')
+      safe_url[ui++] = '\\';
     safe_url[ui++] = img_url[k];
   }
 
@@ -603,8 +697,8 @@ static esp_err_t status_handler(httpd_req_t *req) {
                      "\"up\":%lu,"
                      "\"events\":%s"
                      "}",
-                     n2, n3, n4, lpg, ch4, smoke, h2, gas, sec, pir,
-                     face, safe_url, (unsigned long)uptime_s, ev_buf);
+                     n2, n3, n4, lpg, ch4, smoke, h2, gas, sec, pir, face,
+                     safe_url, (unsigned long)uptime_s, ev_buf);
 
   httpd_resp_send(req, buf, len);
   free(buf);
@@ -639,14 +733,18 @@ static esp_err_t events_csv_handler(httpd_req_t *req) {
   for (int i = count - 1; i >= 0; i--) {
     int idx = ((g_dash.ev_head - 1 - i) + DASH_EVENTS) % DASH_EVENTS;
     const dash_event_t *e = &g_dash.events[idx];
-    const char *lvl_str = (e->lvl == 2) ? "danger" : (e->lvl == 1) ? "warning" : "info";
+    const char *lvl_str = (e->lvl == 2)   ? "danger"
+                          : (e->lvl == 1) ? "warning"
+                                          : "info";
     char qmsg[120] = "\"";
     int qi = 1;
     for (int k = 0; e->msg[k] && qi < (int)sizeof(qmsg) - 3; k++) {
-      if (e->msg[k] == '"') qmsg[qi++] = '"';
+      if (e->msg[k] == '"')
+        qmsg[qi++] = '"';
       qmsg[qi++] = e->msg[k];
     }
-    qmsg[qi++] = '"'; qmsg[qi] = '\0';
+    qmsg[qi++] = '"';
+    qmsg[qi] = '\0';
     snprintf(row, sizeof(row), "%s,%s,%s\r\n", e->t, lvl_str, qmsg);
     httpd_resp_sendstr_chunk(req, row);
   }
@@ -663,7 +761,8 @@ static esp_err_t events_csv_handler(httpd_req_t *req) {
    ================================================================ */
 static esp_err_t snapshot_handler(httpd_req_t *req) {
   if (!g_snap_buf) {
-    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Buffer not allocated");
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Buffer not allocated");
     return ESP_OK;
   }
   if (xSemaphoreTake(g_snap_mtx, pdMS_TO_TICKS(200)) != pdTRUE) {
@@ -691,7 +790,8 @@ static esp_err_t snapshot_handler(httpd_req_t *req) {
    ================================================================ */
 static esp_err_t snapshot_download_handler(httpd_req_t *req) {
   if (!g_snap_buf) {
-    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Buffer not allocated");
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Buffer not allocated");
     return ESP_OK;
   }
   if (xSemaphoreTake(g_snap_mtx, pdMS_TO_TICKS(200)) != pdTRUE) {
@@ -704,7 +804,8 @@ static esp_err_t snapshot_download_handler(httpd_req_t *req) {
     return ESP_OK;
   }
   httpd_resp_set_type(req, "image/jpeg");
-  httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"sentinel_snapshot.jpg\"");
+  httpd_resp_set_hdr(req, "Content-Disposition",
+                     "attachment; filename=\"sentinel_snapshot.jpg\"");
   httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_send(req, (const char *)g_snap_buf, (ssize_t)g_snap_len);
@@ -731,12 +832,13 @@ static esp_err_t webhook_handler(httpd_req_t *req) {
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_sendstr(req, "OK");
 
-  if (pin < 0) return ESP_OK;
+  if (pin < 0)
+    return ESP_OK;
 
   /* Parse optional &val= (used by flash brightness slider V28) */
   char query[48] = {0};
   char valstr[8] = {0};
-  int  val = 0;
+  int val = 0;
   if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK)
     if (httpd_query_key_value(query, "val", valstr, sizeof(valstr)) == ESP_OK)
       val = atoi(valstr);
@@ -754,7 +856,8 @@ static void start_webhook_server(void) {
   cfg.server_port = WEBHOOK_SERVER_PORT;
   cfg.ctrl_port = 32769;
   cfg.max_uri_handlers = 14;
-  cfg.stack_size        = 10240;  /* raised from 4096: status_handler uses ~2KB stack after heap fix */
+  cfg.stack_size = 10240; /* raised from 4096: status_handler uses ~2KB stack
+                             after heap fix */
 
   if (httpd_start(&s_webhook, &cfg) != ESP_OK) {
     ESP_LOGE(TAG, "Webhook server failed to start.");
@@ -786,9 +889,9 @@ static void start_webhook_server(void) {
   httpd_register_uri_handler(s_webhook, &uri_snap);
 
   httpd_uri_t uri_snap_dl = {.uri = "/snapshot.download",
-                              .method = HTTP_GET,
-                              .handler = snapshot_download_handler,
-                              .user_ctx = NULL};
+                             .method = HTTP_GET,
+                             .handler = snapshot_download_handler,
+                             .user_ctx = NULL};
   httpd_register_uri_handler(s_webhook, &uri_snap_dl);
 
   httpd_uri_t uri_dash = {.uri = "/",
@@ -799,7 +902,8 @@ static void start_webhook_server(void) {
 
   ESP_LOGI(TAG, "Webhook server on :%d/blynk", WEBHOOK_SERVER_PORT);
   ESP_LOGI(TAG, "Dashboard:     http://<NODE1_IP>:%d/", WEBHOOK_SERVER_PORT);
-  ESP_LOGI(TAG, "Event CSV:     http://<NODE1_IP>:%d/api/events.csv", WEBHOOK_SERVER_PORT);
+  ESP_LOGI(TAG, "Event CSV:     http://<NODE1_IP>:%d/api/events.csv",
+           WEBHOOK_SERVER_PORT);
 }
 
 /* ================================================================
@@ -811,8 +915,8 @@ static void webhook_task(void *pv) {
     if (xQueueReceive(g_webhook_queue, &packed, portMAX_DELAY) != pdTRUE)
       continue;
 
-    int pin = packed & 0xFFFF;           /* low 16 bits  = pin number  */
-    int val = (packed >> 16) & 0xFFFF;  /* high 16 bits = value 0-255 */
+    int pin = packed & 0xFFFF;         /* low 16 bits  = pin number  */
+    int val = (packed >> 16) & 0xFFFF; /* high 16 bits = value 0-255 */
     ESP_LOGI(TAG, "[WEBHOOK_TASK] V%d val=%d", pin, val);
 
     switch (pin) {
@@ -822,60 +926,132 @@ static void webhook_task(void *pv) {
       run_pipeline(LOC_MAIN_DOOR);
       break;
 
-    case VPIN_DOOR_OVERRIDE:   /* V13 — open main door */
+    case VPIN_DOOR_OVERRIDE: /* V13 — open main door */
       espnow_send_cmd(g_node2_mac, CMD_DOOR_OPEN, 0, LOC_MAIN_DOOR);
       dash_push_event(0, "REMOTE: Main Door OPEN");
       break;
 
-    case VPIN_VENT_OVERRIDE:   /* V14 — vent ON */
+    case VPIN_VENT_OVERRIDE: /* V14 — vent ON */
       espnow_send_cmd(g_node3_mac, CMD_VENT_ON, 0, 0);
       dash_push_event(0, "REMOTE: Vent ON");
       break;
 
-    case VPIN_VALVE_OVERRIDE:  /* V15 — valve OPEN */
+    case VPIN_VALVE_OVERRIDE: /* V15 — valve OPEN */
       espnow_send_cmd(g_node3_mac, CMD_VALVE_ON, 0, 0);
       dash_push_event(1, "REMOTE: Gas Valve OPEN");
       break;
 
     /* ── Door controls ── */
-    case 20: espnow_send_cmd(g_node2_mac, CMD_DOOR_OPEN,  0, LOC_MAIN_DOOR); dash_push_event(0,"REMOTE: Main Door OPEN");   break;
-    case 21: espnow_send_cmd(g_node2_mac, CMD_DOOR_CLOSE, 0, LOC_MAIN_DOOR); dash_push_event(0,"REMOTE: Main Door CLOSED"); break;
-    case 22: espnow_send_cmd(g_node3_mac, CMD_DOOR_OPEN,  0, LOC_BACK_DOOR); dash_push_event(0,"REMOTE: Back Door OPEN");   break;
-    case 23: espnow_send_cmd(g_node3_mac, CMD_DOOR_CLOSE, 0, LOC_BACK_DOOR); dash_push_event(0,"REMOTE: Back Door CLOSED"); break;
+    case 20:
+      espnow_send_cmd(g_node2_mac, CMD_DOOR_OPEN, 0, LOC_MAIN_DOOR);
+      dash_push_event(0, "REMOTE: Main Door OPEN");
+      break;
+    case 21:
+      espnow_send_cmd(g_node2_mac, CMD_DOOR_CLOSE, 0, LOC_MAIN_DOOR);
+      dash_push_event(0, "REMOTE: Main Door CLOSED");
+      break;
+    case 22:
+      espnow_send_cmd(g_node3_mac, CMD_DOOR_OPEN, 0, LOC_BACK_DOOR);
+      dash_push_event(0, "REMOTE: Back Door OPEN");
+      break;
+    case 23:
+      espnow_send_cmd(g_node3_mac, CMD_DOOR_CLOSE, 0, LOC_BACK_DOOR);
+      dash_push_event(0, "REMOTE: Back Door CLOSED");
+      break;
 
     /* ── Valve controls ── */
-    case 24: espnow_send_cmd(g_node3_mac, CMD_VALVE_ON,  0, 0); dash_push_event(1,"REMOTE: Gas Valve OPEN");   break;
-    case 25: espnow_send_cmd(g_node3_mac, CMD_VALVE_OFF, 0, 0); dash_push_event(0,"REMOTE: Gas Valve CLOSED"); break;
+    case 24:
+      espnow_send_cmd(g_node3_mac, CMD_VALVE_ON, 0, 0);
+      dash_push_event(1, "REMOTE: Gas Valve OPEN");
+      break;
+    case 25:
+      espnow_send_cmd(g_node3_mac, CMD_VALVE_OFF, 0, 0);
+      dash_push_event(0, "REMOTE: Gas Valve CLOSED");
+      break;
 
     /* ── Vent controls ── */
-    case 26: espnow_send_cmd(g_node3_mac, CMD_VENT_ON,  0, 0); dash_push_event(0,"REMOTE: Vent ON");  break;
-    case 27: espnow_send_cmd(g_node3_mac, CMD_VENT_OFF, 0, 0); dash_push_event(0,"REMOTE: Vent OFF"); break;
+    case 26:
+      espnow_send_cmd(g_node3_mac, CMD_VENT_ON, 0, 0);
+      dash_push_event(0, "REMOTE: Vent ON");
+      break;
+    case 27:
+      espnow_send_cmd(g_node3_mac, CMD_VENT_OFF, 0, 0);
+      dash_push_event(0, "REMOTE: Vent OFF");
+      break;
 
     /* ── Flash brightness → NODE_4 LED ── */
     case 28: {
       int bri = val;
-      if (bri < 0)   bri = 0;
-      if (bri > 255) bri = 255;
+      if (bri < 0)
+        bri = 0;
+      if (bri > 255)
+        bri = 255;
       espnow_send_cmd(g_node4_mac, CMD_SET_FLASH, bri, 0);
       ESP_LOGI(TAG, "[FLASH] NODE_4 brightness -> %d", bri);
       break;
     }
 
     /* ── Appliance overrides — NODE_1 GPIO direct ── */
-    case 30: gpio_set_level(KITCHEN_LIGHT_PIN,1); dash_push_event(0,"OVERRIDE: Kitchen Light ON");    break;
-    case 31: gpio_set_level(KITCHEN_LIGHT_PIN,0); dash_push_event(0,"OVERRIDE: Kitchen Light OFF");   break;
-    case 32: gpio_set_level(BEDROOM_LIGHT_PIN,1); dash_push_event(0,"OVERRIDE: Bedroom Light ON");    break;
-    case 33: gpio_set_level(BEDROOM_LIGHT_PIN,0); dash_push_event(0,"OVERRIDE: Bedroom Light OFF");   break;
-    case 34: gpio_set_level(PARLOUR_LIGHT_PIN,1); dash_push_event(0,"OVERRIDE: Parlour Light ON");    break;
-    case 35: gpio_set_level(PARLOUR_LIGHT_PIN,0); dash_push_event(0,"OVERRIDE: Parlour Light OFF");   break;
-    case 36: gpio_set_level(OUTSIDE_LIGHT_PIN,1); dash_push_event(0,"OVERRIDE: Outside Light ON");    break;
-    case 37: gpio_set_level(OUTSIDE_LIGHT_PIN,0); dash_push_event(0,"OVERRIDE: Outside Light OFF");   break;
-    case 38: gpio_set_level(COOLING_PIN,1);        dash_push_event(0,"OVERRIDE: Cooling ON");          break;
-    case 39: gpio_set_level(COOLING_PIN,0);        dash_push_event(0,"OVERRIDE: Cooling OFF");         break;
-    case 40: run_blind(BEDROOM_SERVO_1_CH,BEDROOM_SERVO_2_CH,true);  bedroom_blinds_open=true;  dash_push_event(0,"OVERRIDE: Bedroom Blinds OPEN");  break;
-    case 41: run_blind(BEDROOM_SERVO_1_CH,BEDROOM_SERVO_2_CH,false); bedroom_blinds_open=false; dash_push_event(0,"OVERRIDE: Bedroom Blinds CLOSE"); break;
-    case 42: run_blind(PARLOUR_SERVO_1_CH,PARLOUR_SERVO_2_CH,true);  parlour_blinds_open=true;  dash_push_event(0,"OVERRIDE: Parlour Blinds OPEN");  break;
-    case 43: run_blind(PARLOUR_SERVO_1_CH,PARLOUR_SERVO_2_CH,false); parlour_blinds_open=false; dash_push_event(0,"OVERRIDE: Parlour Blinds CLOSE"); break;
+    case 30:
+      gpio_set_level(KITCHEN_LIGHT_PIN, 1);
+      dash_push_event(0, "OVERRIDE: Kitchen Light ON");
+      break;
+    case 31:
+      gpio_set_level(KITCHEN_LIGHT_PIN, 0);
+      dash_push_event(0, "OVERRIDE: Kitchen Light OFF");
+      break;
+    case 32:
+      gpio_set_level(BEDROOM_LIGHT_PIN, 1);
+      dash_push_event(0, "OVERRIDE: Bedroom Light ON");
+      break;
+    case 33:
+      gpio_set_level(BEDROOM_LIGHT_PIN, 0);
+      dash_push_event(0, "OVERRIDE: Bedroom Light OFF");
+      break;
+    case 34:
+      gpio_set_level(PARLOUR_LIGHT_PIN, 1);
+      dash_push_event(0, "OVERRIDE: Parlour Light ON");
+      break;
+    case 35:
+      gpio_set_level(PARLOUR_LIGHT_PIN, 0);
+      dash_push_event(0, "OVERRIDE: Parlour Light OFF");
+      break;
+    case 36:
+      gpio_set_level(OUTSIDE_LIGHT_PIN, 1);
+      dash_push_event(0, "OVERRIDE: Outside Light ON");
+      break;
+    case 37:
+      gpio_set_level(OUTSIDE_LIGHT_PIN, 0);
+      dash_push_event(0, "OVERRIDE: Outside Light OFF");
+      break;
+    case 38:
+      gpio_set_level(COOLING_PIN, 1);
+      dash_push_event(0, "OVERRIDE: Cooling ON");
+      break;
+    case 39:
+      gpio_set_level(COOLING_PIN, 0);
+      dash_push_event(0, "OVERRIDE: Cooling OFF");
+      break;
+    case 40:
+      run_blind(BEDROOM_SERVO_1_CH, BEDROOM_SERVO_2_CH, true);
+      bedroom_blinds_open = true;
+      dash_push_event(0, "OVERRIDE: Bedroom Blinds OPEN");
+      break;
+    case 41:
+      run_blind(BEDROOM_SERVO_1_CH, BEDROOM_SERVO_2_CH, false);
+      bedroom_blinds_open = false;
+      dash_push_event(0, "OVERRIDE: Bedroom Blinds CLOSE");
+      break;
+    case 42:
+      run_blind(PARLOUR_SERVO_1_CH, PARLOUR_SERVO_2_CH, true);
+      parlour_blinds_open = true;
+      dash_push_event(0, "OVERRIDE: Parlour Blinds OPEN");
+      break;
+    case 43:
+      run_blind(PARLOUR_SERVO_1_CH, PARLOUR_SERVO_2_CH, false);
+      parlour_blinds_open = false;
+      dash_push_event(0, "OVERRIDE: Parlour Blinds CLOSE");
+      break;
 
     default:
       ESP_LOGW(TAG, "[WEBHOOK_TASK] Unhandled pin V%d.", pin);
@@ -1083,7 +1259,7 @@ static void init_mic(void) {
 
   i2s_std_config_t std_cfg = {};
   std_cfg.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000);
-  
+
   std_cfg.slot_cfg.data_bit_width = I2S_DATA_BIT_WIDTH_32BIT;
   std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
   std_cfg.slot_cfg.slot_mode = I2S_SLOT_MODE_MONO;
@@ -1094,7 +1270,7 @@ static void init_mic(void) {
   std_cfg.slot_cfg.left_align = true;
   std_cfg.slot_cfg.big_endian = false;
   std_cfg.slot_cfg.bit_order_lsb = false;
-  
+
   std_cfg.gpio_cfg.mclk = I2S_GPIO_UNUSED;
   std_cfg.gpio_cfg.bclk = I2S_BCLK_IO;
   std_cfg.gpio_cfg.ws = I2S_WS_IO;
@@ -1162,9 +1338,8 @@ static void detect_task(void *arg) {
   char *mn_name =
       esp_srmodel_filter((srmodel_list_t *)arg, ESP_MN_PREFIX, ESP_MN_ENGLISH);
   if (!mn_name) {
-    ESP_LOGE(TAG, "No English MultiNet model found.");
-    vTaskDelete(NULL);
-    return;
+    ESP_LOGW(TAG, "srmodel_filter failed, using hardcoded mn7_en");
+    mn_name = (char *)"mn7_en";
   }
   ESP_LOGI(TAG, "MultiNet model: %s", mn_name);
 
@@ -1180,6 +1355,15 @@ static void detect_task(void *arg) {
   esp_mn_commands_update();
   esp_mn_commands_print();
 
+  /* Drain any backlogged AFE frames accumulated during command registration */
+  ESP_LOGI(TAG, "Draining AFE buffer...");
+  for (int i = 0; i < 200; i++) {
+    afe_fetch_result_t *drain = g_afe_handle->fetch(g_afe_data);
+    if (!drain)
+      break;
+  }
+  ESP_LOGI(TAG, "AFE buffer drained.");
+
   g_ei_listening = false;
   ESP_LOGI(TAG, "=== SENTINEL ACTIVE (MN7) === Say your wake word");
 
@@ -1194,6 +1378,7 @@ static void detect_task(void *arg) {
       gpio_set_level(BLUE_LED_PIN, 1);
       multinet->clean(mn_data);
       g_ei_listening = true;
+      ESP_LOGW(TAG, ">>> LISTENING MODE ON — say a command now!");
     }
 
     if (g_ei_listening) {
@@ -1246,13 +1431,15 @@ extern "C" void app_main(void) {
   init_mic();
 
   g_pipeline_mtx = xSemaphoreCreateMutex();
+  g_node4_stream_sem = xSemaphoreCreateBinary();  /* for NODE_4 stream-live ack */
   g_webhook_queue = xQueueCreate(WEBHOOK_QUEUE_DEPTH, sizeof(int));
   g_dash_mtx = xSemaphoreCreateMutex();
   memset(&g_dash, 0, sizeof(g_dash));
 
   /* Allocate local snapshot buffer — prefer PSRAM, fall back to DRAM */
   g_snap_mtx = xSemaphoreCreateMutex();
-  g_snap_buf = (uint8_t *)heap_caps_malloc(SNAP_MAX_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  g_snap_buf = (uint8_t *)heap_caps_malloc(SNAP_MAX_BYTES,
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!g_snap_buf) {
     ESP_LOGW(TAG, "PSRAM unavailable — allocating snapshot buffer in DRAM.");
     g_snap_buf = (uint8_t *)malloc(SNAP_MAX_BYTES);
@@ -1260,9 +1447,9 @@ extern "C" void app_main(void) {
   if (g_snap_buf) {
     ESP_LOGI(TAG, "Snapshot buffer ready (%d KB).", SNAP_MAX_BYTES / 1024);
   } else {
-    ESP_LOGE(TAG, "No RAM for snapshot buffer — /snapshot.jpg will be disabled.");
+    ESP_LOGE(TAG,
+             "No RAM for snapshot buffer — /snapshot.jpg will be disabled.");
   }
-
 
   s_feedback_queue = xQueueCreate(5, sizeof(beep_type_t));
   xTaskCreate(feedback_task, "feedback", 2048, NULL, 4, NULL);
@@ -1315,7 +1502,7 @@ extern "C" void app_main(void) {
                               NULL, 1) != pdPASS) {
     ESP_LOGE(TAG, "Failed to create detect_task (out of memory?)");
   }
-  if (xTaskCreatePinnedToCore(ei_task, "ei_infer", 8192, NULL, 5, NULL, 1) !=
+  if (xTaskCreatePinnedToCore(ei_task, "ei_infer", 8192, NULL, 3, NULL, 0) !=
       pdPASS) {
     ESP_LOGE(TAG, "Failed to create ei_task (out of memory?)");
   }
